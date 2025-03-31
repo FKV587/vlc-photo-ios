@@ -12,11 +12,14 @@
  *****************************************************************************/
 
 import UIKit
+import MobileCoreServices
 
 enum RemoteNetworkCellType: Int {
     @available(iOS 11.0, *)
     case local
+#if os(iOS)
     case cloud
+#endif
     case streaming
     case download
     case wifi
@@ -44,11 +47,13 @@ protocol RemoteNetworkDataSourceDelegate {
 
 @objc(VLCRemoteNetworkDataSourceAndDelegate)
 class RemoteNetworkDataSource: NSObject, UITableViewDataSource, UITableViewDelegate {
-    let localVC = UIDocumentPickerViewController(documentTypes: ["public.item"], in: .open)
+    let localVC: UIDocumentPickerViewController
+    #if os(iOS)
     let cloudVC = VLCCloudServicesTableViewController(nibName: "VLCCloudServicesTableViewController", bundle: Bundle.main)
+    #endif
     let streamingVC = VLCOpenNetworkStreamViewController(nibName: "VLCOpenNetworkStreamViewController", bundle: Bundle.main)
     let downloadVC = VLCDownloadViewController(nibName: "VLCDownloadViewController", bundle: Bundle.main)
-    let favoriteVC = VLCFavoriteListViewController()
+    let favoriteVC = FavoriteListViewController()
 
     @objc weak var delegate: RemoteNetworkDataSourceDelegate?
 
@@ -72,6 +77,7 @@ class RemoteNetworkDataSource: NSObject, UITableViewDataSource, UITableViewDeleg
                 localFilesCell.accessibilityIdentifier = VLCAccessibilityIdentifier.local
                 return localFilesCell
             }
+#if os(iOS)
         case .cloud:
             if let networkCell = tableView.dequeueReusableCell(withIdentifier: RemoteNetworkCell.cellIdentifier) {
                 networkCell.textLabel?.text = cloudVC.title
@@ -80,6 +86,7 @@ class RemoteNetworkDataSource: NSObject, UITableViewDataSource, UITableViewDeleg
                 networkCell.accessibilityIdentifier = VLCAccessibilityIdentifier.cloud
                 return networkCell
             }
+#endif
         case .streaming:
             if let networkCell = tableView.dequeueReusableCell(withIdentifier: RemoteNetworkCell.cellIdentifier) {
                 networkCell.textLabel?.text = streamingVC.title
@@ -113,7 +120,16 @@ class RemoteNetworkDataSource: NSObject, UITableViewDataSource, UITableViewDeleg
         assertionFailure("Cell is nil, did you forget to register the identifier?")
         return UITableViewCell()
     }
-
+    // MARK: - INIT
+    
+    override init() {
+          if #available(iOS 14.0, *) {
+              localVC = UIDocumentPickerViewController(forOpeningContentTypes: [.item, .folder], asCopy: false)
+          } else {
+              localVC = UIDocumentPickerViewController(documentTypes: ["public.item", "public.folder"], in: .open)
+          }
+          super.init()
+    }
     // MARK: - Delegate
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -141,8 +157,10 @@ class RemoteNetworkDataSource: NSObject, UITableViewDataSource, UITableViewDeleg
         switch cellType {
         case .local:
             return localVC
+#if os(iOS)
         case .cloud:
             return cloudVC
+#endif
         case .streaming:
             return streamingVC
         case .download:

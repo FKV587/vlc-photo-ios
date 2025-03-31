@@ -140,10 +140,8 @@ private extension AudioMiniPlayer {
 
         progressBarView.clipsToBounds = true
 
-        if #available(iOS 11.0, *) {
-            artworkImageView.accessibilityIgnoresInvertColors = true
-            artworkBlurImageView.accessibilityIgnoresInvertColors = true
-        }
+        artworkImageView.accessibilityIgnoresInvertColors = true
+        artworkBlurImageView.accessibilityIgnoresInvertColors = true
         artworkImageView.clipsToBounds = true
         artworkImageView.layer.cornerRadius = 2
 
@@ -158,19 +156,35 @@ private extension AudioMiniPlayer {
     }
 
     private func setupConstraint() {
-        var guide: LayoutAnchorContainer = self
-
-        if #available(iOS 11.0, *) {
-            guide = safeAreaLayoutGuide
-        }
         audioMiniPlayer.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([audioMiniPlayer.leadingAnchor.constraint(equalTo: guide.leadingAnchor,
-                                                                              constant: 8),
-                                     audioMiniPlayer.trailingAnchor.constraint(equalTo: guide.trailingAnchor,
-                                                                               constant: -8),
-                                     audioMiniPlayer.bottomAnchor.constraint(equalTo: bottomAnchor,
-                                                                             constant: -8),
-                                     ])
+        NSLayoutConstraint.activate([
+            audioMiniPlayer.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 8),
+            audioMiniPlayer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            audioMiniPlayer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+        ])
+    }
+
+    private func applyCustomEqualizerProfileIfNeeded() {
+        let userDefaults = UserDefaults.standard
+        guard userDefaults.bool(forKey: kVLCCustomProfileEnabled) else {
+            return
+        }
+
+        let profileIndex = userDefaults.integer(forKey: kVLCSettingEqualizerProfile)
+        let encodedData = userDefaults.data(forKey: kVLCCustomEqualizerProfiles)
+
+        guard let encodedData = encodedData,
+              let customProfiles = NSKeyedUnarchiver(forReadingWith: encodedData).decodeObject(forKey: "root") as? CustomEqualizerProfiles,
+              profileIndex < customProfiles.profiles.count else {
+            return
+        }
+
+        let selectedProfile = customProfiles.profiles[profileIndex]
+        playbackService.preAmplification = CGFloat(selectedProfile.preAmpLevel)
+
+        for (index, frequency) in selectedProfile.frequencies.enumerated() {
+            playbackService.setAmplification(CGFloat(frequency), forBand: UInt32(index))
+        }
     }
 }
 
@@ -200,6 +214,10 @@ extension AudioMiniPlayer: VLCPlaybackServiceDelegate {
         if let queueCollectionView = queueViewController?.queueCollectionView {
             queueCollectionView.reloadData()
         }
+
+        if currentState == .opening {
+            applyCustomEqualizerProfileIfNeeded()
+        }
     }
 
     func displayMetadata(for playbackService: PlaybackService, metadata: VLCMetaData) {
@@ -208,6 +226,14 @@ extension AudioMiniPlayer: VLCPlaybackServiceDelegate {
 
     func playbackPositionUpdated(_ playbackService: PlaybackService) {
         progressBarView.progress = playbackService.playbackPosition
+    }
+
+    func reloadPlayQueue() {
+        guard let queueViewController = queueViewController else {
+            return
+        }
+
+        queueViewController.reload()
     }
 }
 
@@ -246,7 +272,7 @@ private extension AudioMiniPlayer {
         let mlMedia: VLCMLMedia? = VLCMLMedia.init(forPlaying: currentMedia)
 
         let selector: Selector
-        if let mlMedia = mlMedia, mlMedia.type() == .audio || playbackService.playAsAudio {
+        if let mlMedia = mlMedia, (mlMedia.type() == .audio && playbackService.numberOfVideoTracks == 0) || playbackService.playAsAudio {
             selector = #selector(VLCPlayerDisplayController.showAudioPlayer)
         } else {
             selector = #selector(VLCPlayerDisplayController.showFullscreenPlayback)
@@ -260,8 +286,8 @@ private extension AudioMiniPlayer {
 
     @IBAction private func handleLongPressPlayPause(_ sender: UILongPressGestureRecognizer) {
         switch sender.state {
-        // case .began:
-        // In the case of .began we could a an icon like the old miniplayer
+            // case .began:
+            // In the case of .began we could a an icon like the old miniplayer
         case .ended:
             playbackService.stopPlayback()
         case .cancelled, .failed:
@@ -277,77 +303,78 @@ private extension AudioMiniPlayer {
 
 extension AudioMiniPlayer {
 
-// MARK: Drag gesture handlers
+    // MARK: Drag gesture handlers
     @IBAction func didDrag(_ sender: UIPanGestureRecognizer) {
         switch sender.state {
-            case .began:
-                dragDidBegin(sender)
-            case .changed:
-                dragStateDidChange(sender)
-            case .ended:
-                dragDidEnd(sender)
-            default:
-                break
+        case .began:
+            dragDidBegin(sender)
+        case .changed:
+            dragStateDidChange(sender)
+        case .ended:
+            dragDidEnd(sender)
+        default:
+            break
         }
     }
 
     private func dragDidBegin(_ sender: UIPanGestureRecognizer) {
         getPanDirection(sender)
         switch panDirection {
-            case .vertical:
-                queueViewController?.show()
-            case .horizontal:
-                break
+        case .vertical:
+            queueViewController?.show()
+        case .horizontal:
+            break
         }
         originY = frame.minY
     }
 
     private func dragStateDidChange(_ sender: UIPanGestureRecognizer) {
         draggingDelegate.miniPlayerDragStateDidChange(self, sender: sender, panDirection: panDirection)
-        sender.setTranslation(CGPoint.zero, in: UIApplication.shared.keyWindow?.rootViewController?.view)
+        sender.setTranslation(CGPoint.zero, in: UIApplication.shared.delegate?.window??.rootViewController!.view)
         handleHapticFeedback()
         draggingDelegate.miniPlayerNeedsLayout(self)
     }
 
     private func dragDidEnd(_ sender: UIPanGestureRecognizer) {
-        let velocity = sender.velocity(in: UIApplication.shared.keyWindow?.rootViewController?.view)
+
+        let velocity = sender.velocity(in: UIApplication.shared.delegate?.window??.rootViewController!.view)
         if let superview = superview {
             switch panDirection {
-                case .vertical:
-                    let limit = topBottomLimit(for: superview, with: position.vertical)
-                    switch position.vertical {
-                        case .top:
-                            if self.frame.minY > limit || velocity.y > 1000.0 {
-                                let completion: ((Bool) -> Void) = { _ in
-                                    self.queueViewController?.hide()
-                                }
-                                dismissPlayqueue(with: completion)
-                            } else {
-                                showPlayqueue(in: superview)
-                            }
-                        case .bottom:
-                            if stopGestureEnabled && self.frame.minY > originY + 10 {
-                                playbackService.stopPlayback()
-                            } else if self.frame.minY > limit && velocity.y > -1000.0 {
-                                let completion: ((Bool) -> Void) = { _ in
-                                    self.queueViewController?.hide()
-                                }
-                                dismissPlayqueue(with: completion)
-                            } else {
-                                showPlayqueue(in: superview)
-                            }
+            case .vertical:
+                let limit = topBottomLimit(for: superview, with: position.vertical)
+                switch position.vertical {
+                case .top:
+                    if self.frame.minY > limit || velocity.y > 1000.0 {
+                        let completion: ((Bool) -> Void) = { _ in
+                            self.queueViewController?.hide()
+                        }
+                        dismissPlayqueue(with: completion)
+                    } else {
+                        showPlayqueue(in: superview)
                     }
-                case .horizontal:
-                    switch position.horizontal {
-                        case .right:
-                            playbackService.previous()
-                        case .left:
-                            playbackService.next()
-                        case .center:
-                            break
+                case .bottom:
+                    if stopGestureEnabled && self.frame.minY > originY + 10 {
+                        playbackService.stopPlayback()
+                    } else if self.frame.minY > limit && velocity.y > -1000.0 {
+                        let completion: ((Bool) -> Void) = { _ in
+                            self.queueViewController?.hide()
+                        }
+                        dismissPlayqueue(with: completion)
+                    } else {
+                        showPlayqueue(in: superview)
                     }
-                    draggingDelegate.miniPlayerCenterHorizontaly(self)
-                    position.horizontal = .center
+                }
+            case .horizontal:
+                switch position.horizontal {
+                case .right:
+                    playbackService.previous()
+                case .left:
+                    playbackService.next()
+                case .center:
+                    break
+                }
+                draggingDelegate.miniPlayerCenterHorizontaly(self)
+                position.horizontal = .center
             }
             hidePreviousNextOverlay()
             draggingDelegate.miniPlayerDragDidEnd(self, sender: sender, panDirection: panDirection)
@@ -357,22 +384,21 @@ extension AudioMiniPlayer {
         }
     }
 
-// MARK: Drag helpers
+    // MARK: Drag helpers
 
     private func topBottomLimit(for superview: UIView, with position: MiniPlayerVerticalPosition) -> CGFloat {
         switch position {
-            case .top:
-                return superview.frame.maxY / 3
-            case .bottom:
-                return 2 * superview.frame.maxY / 3
+        case .top:
+            return superview.frame.maxY / 3
+        case .bottom:
+            return 2 * superview.frame.maxY / 3
         }
     }
 
     private func getPanDirection(_ sender: UIPanGestureRecognizer) {
-        let velocity = sender.velocity(in: UIApplication.shared.keyWindow?.rootViewController?.view)
+        let velocity = sender.velocity(in: UIApplication.shared.delegate?.window??.rootViewController!.view)
         panDirection = abs(velocity.x) > abs(velocity.y) ? .horizontal : .vertical
     }
-
 
     private func verticalTranslation(in superview: UIView) -> Bool {
         var hapticFeedbackNeeded = false
@@ -404,34 +430,34 @@ extension AudioMiniPlayer {
     private func horizontalTranslation(in superview: UIView) -> Bool {
         var hapticFeedbackNeeded = false
         switch position.horizontal {
-            case .center:
-                if center.x < superview.frame.width / 3 {
-                    hapticFeedbackNeeded = true
-                    position.horizontal = .left
-                } else if center.x > 2 * superview.frame.width / 3 {
-                    hapticFeedbackNeeded = true
-                    position.horizontal = .right
-                }
-            case .left:
-                if center.x > superview.frame.width / 3 {
-                    hapticFeedbackNeeded = true
-                    position.horizontal = .center
-                    hidePreviousNextOverlay()
-                } else {
-                    previousNextImage.image = UIImage(named: "MiniNext")
-                    previousNextOverlay.alpha = abs(superview.center.x - center.x) / (superview.frame.width / 2)
-                    previousNextOverlay.isHidden = false
-                }
-            case .right:
-                if center.x < 2 * superview.frame.width / 3 {
-                    hapticFeedbackNeeded = true
-                    position.horizontal = .center
-                    hidePreviousNextOverlay()
-                } else {
-                    previousNextImage.image = UIImage(named: "MiniPrev")
-                    previousNextOverlay.alpha = abs(superview.center.x - center.x) / (superview.frame.width / 2)
-                    previousNextOverlay.isHidden = false
-                }
+        case .center:
+            if center.x < superview.frame.width / 3 {
+                hapticFeedbackNeeded = true
+                position.horizontal = .left
+            } else if center.x > 2 * superview.frame.width / 3 {
+                hapticFeedbackNeeded = true
+                position.horizontal = .right
+            }
+        case .left:
+            if center.x > superview.frame.width / 3 {
+                hapticFeedbackNeeded = true
+                position.horizontal = .center
+                hidePreviousNextOverlay()
+            } else {
+                previousNextImage.image = UIImage(named: "MiniNext")
+                previousNextOverlay.alpha = abs(superview.center.x - center.x) / (superview.frame.width / 2)
+                previousNextOverlay.isHidden = false
+            }
+        case .right:
+            if center.x < 2 * superview.frame.width / 3 {
+                hapticFeedbackNeeded = true
+                position.horizontal = .center
+                hidePreviousNextOverlay()
+            } else {
+                previousNextImage.image = UIImage(named: "MiniPrev")
+                previousNextOverlay.alpha = abs(superview.center.x - center.x) / (superview.frame.width / 2)
+                previousNextOverlay.isHidden = false
+            }
         }
         return hapticFeedbackNeeded
     }
@@ -440,18 +466,20 @@ extension AudioMiniPlayer {
         var hapticFeedbackNeeded = false
         if let superview = superview {
             switch panDirection {
-                case .vertical:
-                    hapticFeedbackNeeded = verticalTranslation(in: superview)
-                case .horizontal:
-                    hapticFeedbackNeeded = horizontalTranslation(in: superview)
+            case .vertical:
+                hapticFeedbackNeeded = verticalTranslation(in: superview)
+            case .horizontal:
+                hapticFeedbackNeeded = horizontalTranslation(in: superview)
             }
         }
-        if hapticFeedbackNeeded, #available(iOS 10.0, *) {
+#if os(iOS)
+        if hapticFeedbackNeeded {
             ImpactFeedbackGenerator().limitOverstepped()
         }
+#endif
     }
 
-// MARK: Show hide playqueue
+    // MARK: Show hide playqueue
 
     func showPlayqueue(in superview: UIView) {
         if let queueView = queueViewController?.view {
@@ -499,9 +527,11 @@ private extension AudioMiniPlayer {
 
             playbackService.videoOutputView = nil
         } else {
+            artworkImageView.image = nil
             artworkBlurImageView.image = nil
-            queueViewController?.reloadBackground(with: nil)
             artworkBlurView.isHidden = true
+            queueViewController?.reloadBackground(with: nil)
+            playbackService.videoOutputView = artworkImageView
         }
     }
 }
@@ -528,9 +558,9 @@ extension AudioMiniPlayer: UIContextMenuInteractionDelegate {
             actions.append(
                 UIAction(title: shuffleButton.currentTitle ?? NSLocalizedString("SHUFFLE", comment: ""),
                          image: shuffleIcon, state: shuffleState) {
-                    action in
-                    self.handleShuffle()
-                }
+                             action in
+                             self.handleShuffle()
+                         }
             )
         }
 
@@ -577,13 +607,13 @@ extension AudioMiniPlayer: UIContextMenuInteractionDelegate {
         actions.append(
             UIAction(title: NSLocalizedString("STOP_BUTTON", comment: ""),
                      image: UIImage(named: "stopIcon")?.withTintColor(defaultButtonColor, renderingMode: .alwaysOriginal)) {
-                action in
+                         action in
                          self.playbackService.stopPlayback()
                          let completion: ((Bool) -> Void) = { _ in
                              self.queueViewController?.hide()
                          }
                          self.dismissPlayqueue(with: completion)
-            }
+                     }
         )
 
         return UIMenu(title: NSLocalizedString("MENU_PLAYBACK_CONTROLS", comment: ""), children: actions)

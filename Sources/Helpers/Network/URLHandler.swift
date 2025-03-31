@@ -63,13 +63,9 @@ extension VLCURLHandler {
                 return
             }
 
-            if #available(iOS 10, *) {
-                UIApplication.shared.open(callback,
-                                          options: convertToUIApplicationOpenExternalURLOptionsKeyDictionary([:]),
-                                          completionHandler: nil)
-            } else {
-                UIApplication.shared.openURL(callback)
-            }
+            UIApplication.shared.open(callback,
+                                      options: convertToUIApplicationOpenExternalURLOptionsKeyDictionary([:]),
+                                      completionHandler: nil)
         }
     }
 
@@ -150,6 +146,7 @@ extension VLCURLHandler {
         }
     }
 
+#if os(iOS)
     func createAlert() {
         guard let safeMovieURL = self.movieURL else {
             assertionFailure("VLCURLHandler: Fail to retrieve movieURL.")
@@ -157,13 +154,13 @@ extension VLCURLHandler {
         }
 
         let alert = UIAlertController(title: NSLocalizedString("OPEN_STREAM_OR_DOWNLOAD",
-                                                                   comment: ""),
+                                                               comment: ""),
                                       message: safeMovieURL.absoluteString,
                                       preferredStyle: .alert)
 
         let downloadAction = UIAlertAction(title: NSLocalizedString("BUTTON_DOWNLOAD",
-                                                                     comment: ""),
-                                            style: .default) { _ in
+                                                                    comment: ""),
+                                           style: .default) { _ in
             self.handleDownload()
         }
 
@@ -173,8 +170,16 @@ extension VLCURLHandler {
             self.handlePlay()
         }
 
+        let alwaysPlayAction = UIAlertAction(title: NSLocalizedString("ALWAYS_STREAM_URL",
+                                                                      comment: ""),
+                                             style: .default) { _ in
+            UserDefaults.standard.set(true, forKey: kVLCSettingAlwaysPlayURLs)
+            self.handlePlay()
+        }
+
         alert.addAction(downloadAction)
         alert.addAction(playAction)
+        alert.addAction(alwaysPlayAction)
 
         var rootViewController = UIApplication.shared.keyWindow?.rootViewController
         if let tabBarController = UIApplication.shared.keyWindow?.rootViewController
@@ -184,6 +189,7 @@ extension VLCURLHandler {
 
         rootViewController?.present(alert, animated: true, completion: nil)
     }
+#endif
 }
 
 @objc class URLHandlers: NSObject {
@@ -356,7 +362,15 @@ class XCallbackURLHandler: NSObject, VLCURLHandler {
             handleDownload()
             return true
         default:
-            self.createAlert()
+#if os(iOS)
+            if UserDefaults.standard.bool(forKey: kVLCSettingAlwaysPlayURLs) {
+                self.handlePlay()
+            } else {
+                self.createAlert()
+            }
+#else
+            self.handlePlay()
+#endif
             return true
         }
     }
@@ -385,7 +399,7 @@ public class VLCCallbackURLHandler: NSObject, VLCURLHandler {
         } else if !parsedString.hasPrefix("http://") && !parsedString.hasPrefix("https://") && !parsedString.hasPrefix("ftp://") {
             parsedString = "http://\(parsedString)"
         }
-        return URL(string: parsedString)!
+        return URL(string: parsedString) ?? url
     }
 
     public func performOpen(url: URL, options: [UIApplication.OpenURLOptionsKey: AnyObject]) -> Bool {
@@ -396,7 +410,11 @@ public class VLCCallbackURLHandler: NSObject, VLCURLHandler {
 #if os(iOS)
         let scheme = transformedURL.scheme
         if scheme == "http" || scheme == "https" || scheme == "ftp" {
-            self.createAlert()
+            if UserDefaults.standard.bool(forKey: kVLCSettingAlwaysPlayURLs) {
+                handlePlay()
+            } else {
+                self.createAlert()
+            }
         } else {
             handlePlay()
         }
@@ -437,8 +455,10 @@ extension VLCURLHandler {
     // TODO: This code should probably not live here
     func play(url: URL, sub: URL? = nil, completion: ((Bool) -> Void)?) {
         let vpc = PlaybackService.sharedInstance()
-        let mediaList = VLCMediaList(array: [VLCMedia(url: url)])
-        vpc.playMediaList(mediaList, firstIndex: 0, subtitlesFilePath: sub?.absoluteString, completion: completion)
+        if let media = VLCMedia(url: url) {
+            let mediaList = VLCMediaList(array: [media])
+            vpc.playMediaList(mediaList, firstIndex: 0, subtitlesFilePath: sub?.absoluteString, completion: completion)
+        }
     }
 
 #if os(iOS)

@@ -20,11 +20,11 @@
 #import "VLCAppDelegate.h"
 #import "VLC-Swift.h"
 #import "VLCAppSceneDelegate.h"
+#import "VLCMLMedia+isWatched.h"
 
 @interface VLCAppDelegate ()
 {
     BOOL _isComingFromHandoff;
-    VLCKeychainCoordinator *_keychainCoordinator;
     id<VLCURLHandler> _urlHandlerToExecute;
     NSURL *_urlToHandle;
 }
@@ -42,11 +42,10 @@
     }
 
     NSDictionary *appDefaults = @{kVLCSettingAppTheme : @(appThemeIndex),
-                                  kVLCSettingPasscodeAllowFaceID : @(1),
-                                  kVLCSettingPasscodeAllowTouchID : @(1),
+                                  kVLCSettingPasscodeEnableBiometricAuth : @(1),
                                   kVLCSettingContinueAudioInBackgroundKey : @(YES),
                                   kVLCSettingStretchAudio : @(YES),
-                                  kVLCSettingDefaultPreampLevel : @(0),
+                                  kVLCSettingDefaultPreampLevel : @(6),
                                   kVLCSettingTextEncoding : kVLCSettingTextEncodingDefaultValue,
                                   kVLCSettingSkipLoopFilter : kVLCSettingSkipLoopFilterNonRef,
                                   kVLCSettingSubtitlesFont : kVLCSettingSubtitlesFontDefaultValue,
@@ -61,6 +60,7 @@
                                   kVLCSettingBrightnessGesture : @(YES),
                                   kVLCSettingSeekGesture : @(YES),
                                   kVLCSettingCloseGesture : @(YES),
+                                  kVLCSettingPlaybackLongTouchSpeedUp : @(YES),
                                   kVLCSettingVideoFullscreenPlayback : @(YES),
                                   kVLCSettingContinuePlayback : @(1),
                                   kVLCSettingContinueAudioPlayback : @(1),
@@ -75,6 +75,8 @@
                                   kVLCSettingPlaybackBackwardSkipLength : kVLCSettingPlaybackBackwardSkipLengthDefaultValue,
                                   kVLCSettingPlaybackForwardSkipLengthSwipe : kVLCSettingPlaybackForwardSkipLengthSwipeDefaultValue,
                                   kVLCSettingPlaybackBackwardSkipLengthSwipe : kVLCSettingPlaybackBackwardSkipLengthSwipeDefaultValue,
+                                  kVLCSettingPlaybackLockscreenSkip : @(NO),
+                                  kVLCSettingPlaybackRemoteControlSkip : @(NO),
                                   kVLCSettingOpenAppForPlayback : kVLCSettingOpenAppForPlaybackDefaultValue,
                                   kVLCAutomaticallyPlayNextItem : @(YES),
                                   kVLCPlaylistPlayNextItem: @(YES),
@@ -95,16 +97,22 @@
                                   kVLCPlayerIsShuffleEnabled: kVLCPlayerIsShuffleEnabledDefaultValue,
                                   kVLCPlayerIsRepeatEnabled: kVLCPlayerIsRepeatEnabledDefaultValue,
                                   kVLCSettingPlaybackSpeedDefaultValue: @(1.0),
-                                  kVLCPlayerShowPlaybackSpeedShortcut: @(NO)
+                                  kVLCPlayerShowPlaybackSpeedShortcut: @(NO),
+                                  kVLCSettingAlwaysPlayURLs: @(NO),
+                                  kVLCRestoreLastPlayedMedia: @(YES),
+                                  kVLCSettingPlayerControlDuration: kVLCSettingPlayerControlDurationDefaultValue,
+                                  kVLCSettingPauseWhenShowingControls: @(NO)
     };
     [defaults registerDefaults:appDefaults];
 }
 
 - (void)setupTabBarAppearance
 {
+    [self recoverLastPlayingMedia];
+
     VLCAppCoordinator *appCoordinator = [VLCAppCoordinator sharedInstance];
     void (^setupAppCoordinator)(void) = ^{
-        [appCoordinator setTabBarController:(UITabBarController *)self->_window.rootViewController];
+        [appCoordinator setTabBarController:(VLCBottomTabBarController *)self->_window.rootViewController];
     };
     [self validatePasscodeIfNeededWithCompletion:setupAppCoordinator];
 }
@@ -139,19 +147,24 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
+#if TARGET_OS_IOS
     if (@available(iOS 13.0, *)) {
         APLog(@"Using Scene flow");
     } else {
         APLog(@"Using Traditional flow");
         self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
-        self.window.rootViewController = [UITabBarController new];
+        self.window.rootViewController = [VLCBottomTabBarController new];
         [self.window makeKeyAndVisible];
         [VLCAppearanceManager setupAppearanceWithTheme:PresentationTheme.current];
         [self setupTabBarAppearance];
     }
     self.orientationLock = UIInterfaceOrientationMaskPortrait | UIInterfaceOrientationMaskLandscape;
+#endif
 
     [self configureShortCutItemsWithApplication:application];
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setInteger:([defaults integerForKey:kVLCNumberOfLaunches] + 1) forKey:kVLCNumberOfLaunches];
 
     return YES;
 }
@@ -189,7 +202,7 @@
         if ([handler canHandleOpenWithUrl:url options:options]) {
             /* if no passcode is set, immediately execute the handler
              * otherwise, store it for later use by the passcode controller's completion function */
-            if (![VLCKeychainCoordinator passcodeLockEnabled]) {
+            if (![[VLCKeychainCoordinator passcodeService] hasSecret]) {
                 return [handler performOpenWithUrl:url options:options];
             } else {
                 _urlHandlerToExecute = handler;
@@ -203,13 +216,6 @@
 
 - (void)applicationWillResignActive:(UIApplication *)application
 {
-    //Touch ID is shown
-    if ([_window.rootViewController.presentedViewController isKindOfClass:[UINavigationController class]]){
-        UINavigationController *navCon = (UINavigationController *)_window.rootViewController.presentedViewController;
-        if ([navCon.topViewController isKindOfClass:[PasscodeLockController class]]){
-            return;
-        }
-    }
     [self validatePasscodeIfNeededWithCompletion:^{
         //TODO: handle updating the videoview and
         if ([VLCPlaybackService sharedInstance].isPlaying){
@@ -244,6 +250,11 @@
         VLCAppCoordinator *appCoordinator = [VLCAppCoordinator sharedInstance];
         [appCoordinator.mediaLibraryService savePlaybackStateFrom:vps];
     }
+
+    VLCFavoriteService *fs = [[VLCAppCoordinator sharedInstance] favoriteService];
+    [fs storeContentSynchronously];
+
+    [self savePlayingMediaIdentifier];
 }
 
 - (void)application:(UIApplication *)application performActionForShortcutItem:(UIApplicationShortcutItem *)shortcutItem completionHandler:(void (^)(BOOL))completionHandler
@@ -262,19 +273,18 @@
 }
 
 #pragma mark - pass code validation
-- (VLCKeychainCoordinator *)keychainCoordinator
-{
-    if (!_keychainCoordinator) {
-        _keychainCoordinator = [[VLCKeychainCoordinator alloc] init];
-    }
-    return _keychainCoordinator;
-}
-
 - (void)validatePasscodeIfNeededWithCompletion:(void(^)(void))completion
 {
-    if ([VLCKeychainCoordinator passcodeLockEnabled]) {
+    if ([[VLCKeychainCoordinator passcodeService] hasSecret]) {
         //TODO: Dismiss playback
-        [self.keychainCoordinator validatePasscodeWithCompletion:completion];
+        BOOL allowBiometricAuthentication = [[NSUserDefaults standardUserDefaults] boolForKey:kVLCSettingPasscodeEnableBiometricAuth];
+
+        [[VLCKeychainCoordinator passcodeService]
+         validateSecretWithAllowBiometricAuthentication:allowBiometricAuthentication
+         isCancellable:NO
+         completion:^(BOOL success){
+            completion();
+        }];
     } else {
         completion();
     }
@@ -303,6 +313,39 @@
 
 - (void)application:(UIApplication *)application didDiscardSceneSessions:(NSSet<UISceneSession *> *)sceneSessions  API_AVAILABLE(ios(13.0))
 {
+}
+
+#pragma mark - Recover last playing media
+
+- (void)savePlayingMediaIdentifier {
+    VLCMedia *currentMedia = [[VLCPlaybackService sharedInstance] currentlyPlayingMedia];
+    VLCMLIdentifier identifier = -1;
+
+    if (currentMedia) {
+        VLCMLMedia *libraryMedia = [VLCMLMedia mediaForPlayingMedia:currentMedia];
+        identifier = libraryMedia.identifier;
+    }
+
+    [[NSUserDefaults standardUserDefaults] setInteger:identifier forKey:kVLCLastPlayedMediaIdentifier];
+}
+
+- (void)recoverLastPlayingMedia {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+    if (![defaults boolForKey:kVLCRestoreLastPlayedMedia]) {
+        return;
+    }
+
+    VLCMLIdentifier identifier = [defaults integerForKey:kVLCLastPlayedMediaIdentifier];
+    VLCMLMedia *media = [[[VLCAppCoordinator sharedInstance] mediaLibraryService] mediaFor:identifier];
+
+    // If media exists and not watched, recover it.
+    if (media && ![media isWatched]) {
+        [[VLCPlaybackService sharedInstance] playMedia:media openInMiniPlayer:YES];
+
+        // only recover a given media once
+        [defaults setInteger:-1 forKey:kVLCLastPlayedMediaIdentifier];
+    }
 }
 
 @end

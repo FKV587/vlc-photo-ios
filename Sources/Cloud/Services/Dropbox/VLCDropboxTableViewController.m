@@ -10,7 +10,7 @@
  *          Carola Nitz <nitz.carola # googlemail.com>
  *          Fabio Ritrovato <sephiroth87 # videolan.org>
  *          Tamas Timar <ttimar.vlc # gmail.com>
- *
+ *          Eshan Singh <eeeshan789 # gmail.com>
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
 
@@ -24,6 +24,7 @@
 {
     VLCDropboxController *_dropboxController;
     DBFILESMetadata *_selectedFile;
+    DBFILESFolderMetadata *_folder;
     NSArray *_mediaList;
 }
 
@@ -48,17 +49,12 @@
     self.controller = _dropboxController;
     self.controller.delegate = self;
 
-#if TARGET_OS_IOS
-
     self.navigationItem.titleView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"dropbox-white"]];
 
     [self.cloudStorageLogo setImage:[UIImage imageNamed:@"dropbox-white.png"]];
 
     [self.cloudStorageLogo sizeToFit];
     self.cloudStorageLogo.center = self.view.center;
-#else
-    self.title = @"Dropbox";
-#endif
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -67,6 +63,8 @@
     self.controller = [VLCDropboxController sharedInstance];
     self.controller.delegate = self;
 
+    [self requestInformationForCurrentPath];   
+    
     if (self.currentPath != nil)
         self.title = self.currentPath.lastPathComponent;
 
@@ -140,8 +138,9 @@
         [DBClientsManager authorizeFromControllerV2:[UIApplication sharedApplication]
                                          controller:self
                               loadingStatusDelegate:nil
-                                            openURL:^(NSURL * _Nonnull url)  {
-            [[UIApplication sharedApplication] openURL:url];
+                                            openURL:^(NSURL * _Nonnull url) {
+            [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+
         } scopeRequest:nil];
     } else
         [_dropboxController logout];
@@ -157,36 +156,57 @@
 
 #pragma mark - VLCCloudStorageTableViewCell delegation
 
-#if TARGET_OS_IOS
 - (void)triggerDownloadForCell:(VLCCloudStorageTableViewCell *)cell
 {
-    _selectedFile = _mediaList[[self.tableView indexPathForCell:cell].row];
-
-    if (((DBFILESFileMetadata *)_selectedFile).size.longLongValue < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        /* selected item is a proper file, ask the user if s/he wants to download it */
-        NSArray<VLCAlertButton *> *buttonsAction = @[[[VLCAlertButton alloc] initWithTitle: NSLocalizedString(@"BUTTON_CANCEL", nil)
-                                                                                     style: UIAlertActionStyleCancel
-                                                                                    action: ^(UIAlertAction *action) {
-                                                                                        self->_selectedFile = nil;
-                                                                                    }],
-                                                     [[VLCAlertButton alloc] initWithTitle: NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
-                                                                                    action: ^(UIAlertAction *action) {
-                                                                                        [self->_dropboxController downloadFileToDocumentFolder:self->_selectedFile];
-                                                                                        self->_selectedFile = nil;
-                                                                                    }]
-                                                     ];
-        [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
-                                             errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
-                                           viewController:self
-                                            buttonsAction:buttonsAction];
-
+    if ([_mediaList[[self.tableView indexPathForCell:cell].row] isKindOfClass:[DBFILESFolderMetadata class]]) {
+        _folder = _mediaList[[self.tableView indexPathForCell:cell].row];
     } else {
-        [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
-                                             errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
-                                           viewController:self];
+        _selectedFile = _mediaList[[self.tableView indexPathForCell:cell].row];
     }
+    
+    /* selected item is a proper file, ask the user if s/he wants to download it */
+    NSArray<VLCAlertButton *> *buttonsAction = @[
+        [[VLCAlertButton alloc] initWithTitle:NSLocalizedString(@"BUTTON_CANCEL", nil)
+                                       style:UIAlertActionStyleCancel
+                                      action:^(UIAlertAction *action) {
+            self->_selectedFile = nil;
+        }],
+        [[VLCAlertButton alloc] initWithTitle:NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
+                                      action:^(UIAlertAction *action) {
+            if (self->_folder == NULL) {
+                [self->_dropboxController downloadFileToDocumentFolder:self->_selectedFile];
+                self->_selectedFile = nil;
+            } else {
+                [self->_dropboxController downloadFolderFiles:self->_folder];
+                self->_folder = nil;
+            }
+        }]
+    ];
+    
+    [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
+                                         errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
+                                       viewController:self
+                                        buttonsAction:buttonsAction];
 }
 
-#endif
+- (void)triggerFavoriteForCell:(VLCCloudStorageTableViewCell *)cell
+{
+    
+    NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
+    VLCFavoriteService *service = [VLCAppCoordinator sharedInstance].favoriteService;
+    _selectedFile = _mediaList[indexPath.row];
+
+    VLCFavorite *fav = [[VLCFavorite alloc] init];
+    fav.userVisibleName = _selectedFile.name;
+    fav.url = [NSURL URLWithString:[NSString stringWithFormat:@"file://DropBox/%@", _selectedFile.pathLower]];
+
+    if (cell.isFavourite) {
+        [service addFavorite:fav];
+    } else {
+        [service removeFavorite:fav];
+    }
+    
+}
+
 
 @end

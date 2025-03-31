@@ -61,6 +61,8 @@ class VLCRendererDiscovererManager: NSObject {
             print("VLCRendererDiscovererManager: Unable to retrieve list of VLCRendererDiscovererDescription")
             return
         }
+        // FIXME: fix this hack
+        /*
         for discovererDescription in tmpDiscoverersDescription where !isDuplicateDiscoverer(with: discovererDescription) {
             guard let rendererDiscoverer = VLCRendererDiscoverer(name: discovererDescription.name) else {
                 print("VLCRendererDiscovererManager: Unable to instanciate renderer discoverer with name: \(discovererDescription.name)")
@@ -72,7 +74,7 @@ class VLCRendererDiscovererManager: NSObject {
             }
             rendererDiscoverer.delegate = self
             discoverers.append(rendererDiscoverer)
-        }
+        }*/
     }
 
     @objc func stop() {
@@ -91,9 +93,6 @@ class VLCRendererDiscovererManager: NSObject {
         }
         // If only one renderer, choose it automatically
         if getAllRenderers().count == 1, let rendererItem = getAllRenderers().first {
-            let indexPath = IndexPath(row: 0, section: 0)
-            actionSheet.collectionView.selectItem(at: indexPath, animated: false, scrollPosition: .centeredVertically)
-            actionSheet(collectionView: actionSheet.collectionView, cellForItemAt: indexPath)
             actionSheet.action?(rendererItem)
         } else {
             presentingViewController.present(actionSheet, animated: false, completion: nil)

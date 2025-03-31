@@ -18,8 +18,15 @@ NS_ASSUME_NONNULL_BEGIN
 @class MediaLibraryService;
 @class VLCRendererDiscovererManager;
 @class VLCMLMedia;
-@class VLCFavoriteService;
+@class VLCStripeController;
 #endif
+#if TARGET_OS_VISION
+@class MediaLibraryService;
+@class VLCMLMedia;
+@class VLCStripeController;
+#endif
+@class VLCFavoriteService;
+
 
 @class VLCHTTPUploaderController;
 
@@ -28,19 +35,31 @@ NS_ASSUME_NONNULL_BEGIN
 + (nonnull instancetype)sharedInstance;
 
 @property (readonly) VLCHTTPUploaderController *httpUploaderController;
+@property (readonly) VLCFavoriteService *favoriteService;
 
 #if TARGET_OS_IOS
 @property (readonly) MediaLibraryService *mediaLibraryService;
 @property (readonly) VLCRendererDiscovererManager *rendererDiscovererManager;
-@property (readonly) VLCFavoriteService *favoriteService;
+@property (readonly) VLCStripeController *stripeController;
 
 @property (nullable) UIWindow *externalWindow;
-
-- (void)setTabBarController:(UITabBarController *)tabBarController;
+@property (retain) UITabBarController *tabBarController;
 
 - (void)handleShortcutItem:(UIApplicationShortcutItem *)shortcutItem;
 
-- (VLCMLMedia *)mediaForUserActivity:(NSUserActivity *)userActivity;
+- (nullable VLCMLMedia *)mediaForUserActivity:(NSUserActivity *)userActivity;
+#endif
+
+#if TARGET_OS_VISION
+@property (readonly) MediaLibraryService *mediaLibraryService;
+@property (readonly) VLCStripeController *stripeController;
+
+@property (nullable) UIWindow *externalWindow;
+@property (retain) UITabBarController *tabBarController;
+
+- (void)handleShortcutItem:(UIApplicationShortcutItem *)shortcutItem;
+
+- (nullable VLCMLMedia *)mediaForUserActivity:(NSUserActivity *)userActivity;
 #endif
 
 @end

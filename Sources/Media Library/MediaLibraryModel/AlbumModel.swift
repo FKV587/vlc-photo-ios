@@ -87,8 +87,8 @@ extension AlbumModel {
         }
         sortModel.currentSort = criteria
         sortModel.desc = desc
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 }
@@ -97,10 +97,11 @@ extension AlbumModel {
 extension VLCMLAlbum: SearchableMLModel {
     func contains(_ searchString: String) -> Bool {
         var matches = false
-        matches = matches || title.lowercased().contains(searchString)
-        matches = matches || String(releaseYear()).lowercased().contains(searchString)
-        matches = matches || shortSummary.lowercased().contains(searchString)
-        matches = matches || albumArtist?.contains(searchString) ?? false
+
+        matches = matches || search(searchString, in: title)
+        matches = matches || search(searchString, in: String(releaseYear()))
+        matches = matches || search(searchString, in: shortSummary)
+        matches = matches || search(searchString, in: albumArtist?.name ?? "")
 
         return matches
     }
@@ -111,8 +112,8 @@ extension VLCMLAlbum: SearchableMLModel {
 extension AlbumModel: MediaLibraryObserver {
     func medialibrary(_ medialibrary: MediaLibraryService, didAddAlbums albums: [VLCMLAlbum]) {
         albums.forEach({ append($0) })
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 
@@ -133,8 +134,8 @@ extension AlbumModel: MediaLibraryObserver {
 
         fileArrayLock.lock()
         files = swapModels(with: albums)
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 
@@ -146,8 +147,8 @@ extension AlbumModel: MediaLibraryObserver {
         files.removeAll {
             albumsIds.contains(NSNumber(value: $0.identifier()))
         }
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 

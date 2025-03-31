@@ -31,7 +31,7 @@
 
 @interface VLCServerBrowsingController()
 {
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
     MediaLibraryService *_medialibraryService;
 #endif
 }
@@ -41,7 +41,7 @@
 
 - (instancetype)initWithViewController:(UIViewController *)viewController
                          serverBrowser:(id<VLCNetworkServerBrowser>)browser
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
                    medialibraryService:(MediaLibraryService *)medialibraryService
 #endif
 {
@@ -55,7 +55,7 @@
             movieDBSessionManager.apiKey = kVLCfortvOSMovieDBKey;
             [movieDBSessionManager fetchProperties];
         }
-# elif TARGET_OS_IOS
+#else
         _medialibraryService = medialibraryService;
 #endif
     }
@@ -95,9 +95,7 @@
     if (item.isContainer) {
         cell.isDirectory = YES;
         cell.thumbnailImage = self.folderImage;
-#if TARGET_OS_IOS
         cell.isFavorable = YES;
-#endif
     } else {
         cell.isDirectory = NO;
         cell.thumbnailImage = self.genericFileImage;
@@ -117,7 +115,7 @@
             subtitle = duration;
         }
         cell.subtitle = subtitle;
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
         if ([cell isKindOfClass:[VLCNetworkListCell class]] && subtitle == nil) {
             [(VLCNetworkListCell *)cell setTitleLabelCentered:YES];
         }
@@ -132,12 +130,12 @@
     cell.title = item.name;
 
     NSURL *thumbnailURL = nil;
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
     VLCMLMedia *media = [_medialibraryService fetchMediaWith:[item URL]];
     if (media != nil) {
         thumbnailURL = media.thumbnail;
     } else if ([item respondsToSelector:@selector(thumbnailURL)]) {
-#elif TARGET_OS_TV
+#else
         if ([item respondsToSelector:@selector(thumbnailURL)]) {
 #endif
         thumbnailURL = item.thumbnailURL;
@@ -169,27 +167,23 @@
     NSString *FileSubtitlePath = nil;
     NSData *receivedSub = [NSData dataWithContentsOfURL:subtitleURL]; // TODO: fix synchronous load
 
-    if (receivedSub.length < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-        NSString *directoryPath = searchPaths[0];
-        FileSubtitlePath = [directoryPath stringByAppendingPathComponent:[subtitleURL lastPathComponent]];
+    NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+    NSString *directoryPath = searchPaths[0];
+    FileSubtitlePath = [directoryPath stringByAppendingPathComponent:[subtitleURL lastPathComponent]];
 
-        NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (![fileManager fileExistsAtPath:FileSubtitlePath]) {
+        //create local subtitle file
+        [fileManager createFileAtPath:FileSubtitlePath contents:nil attributes:nil];
         if (![fileManager fileExistsAtPath:FileSubtitlePath]) {
-            //create local subtitle file
-            [fileManager createFileAtPath:FileSubtitlePath contents:nil attributes:nil];
-            if (![fileManager fileExistsAtPath:FileSubtitlePath]) {
-                APLog(@"file creation failed, no data was saved");
-                return nil;
-            }
+            APLog(@"file creation failed, no data was saved");
+            [self.viewController vlc_showAlertWithTitle:NSLocalizedString(@"DISK_FULL", nil)
+                                                message:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), [subtitleURL lastPathComponent], [[UIDevice currentDevice] model]]
+                                            buttonTitle:NSLocalizedString(@"BUTTON_OK", nil)];
+            return nil;
         }
-        [receivedSub writeToFile:FileSubtitlePath atomically:YES];
-    } else {
-
-        [self.viewController vlc_showAlertWithTitle:NSLocalizedString(@"DISK_FULL", nil)
-                                            message:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), [subtitleURL lastPathComponent], [[UIDevice currentDevice] model]]
-                                        buttonTitle:NSLocalizedString(@"BUTTON_OK", nil)];
     }
+    [receivedSub writeToFile:FileSubtitlePath atomically:YES];
 
     return FileSubtitlePath;
 }
@@ -280,16 +274,8 @@
         return NO;
     }
 
-    if (item.fileSizeBytes.longLongValue  < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        [self _downloadItem:item];
-        return YES;
-    } else {
-        NSString *title = NSLocalizedString(@"DISK_FULL", nil);
-        NSString *messsage = [NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), item.name, [[UIDevice currentDevice] model]];
-        NSString *button = NSLocalizedString(@"BUTTON_OK", nil);
-        [self.viewController vlc_showAlertWithTitle:title message:messsage buttonTitle:button];
-        return NO;
-    }
+    [self _downloadItem:item];
+    return YES;
 }
 
 - (void)_downloadItem:(id<VLCNetworkServerBrowserItem>)item
@@ -349,21 +335,23 @@
 
     NSData *receivedSub = [NSData dataWithContentsOfURL:subtitleURL]; // TODO: fix synchronous load
 
-    if (receivedSub.length < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-        NSString *directoryPath = searchPaths[0];
-        FileSubtitlePath = [directoryPath stringByAppendingPathComponent:filename];
+    NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *directoryPath = searchPaths[0];
+    FileSubtitlePath = [directoryPath stringByAppendingPathComponent:filename];
 
-        NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (![fileManager fileExistsAtPath:FileSubtitlePath]) {
+        //create local subtitle file
+        [fileManager createFileAtPath:FileSubtitlePath contents:nil attributes:nil];
         if (![fileManager fileExistsAtPath:FileSubtitlePath]) {
-            //create local subtitle file
-            [fileManager createFileAtPath:FileSubtitlePath contents:nil attributes:nil];
-            if (![fileManager fileExistsAtPath:FileSubtitlePath])
-                APLog(@"file creation failed, no data was saved");
+            APLog(@"file creation failed, no data was saved");
+            [self.viewController vlc_showAlertWithTitle:NSLocalizedString(@"DISK_FULL", nil)
+                                                message:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), [subtitleURL lastPathComponent], [[UIDevice currentDevice] model]]
+                                            buttonTitle:NSLocalizedString(@"BUTTON_OK", nil)];
+            return;
         }
-        [receivedSub writeToFile:FileSubtitlePath atomically:YES];
-    } else
-        APLog(@"Disk full");
+    }
+    [receivedSub writeToFile:FileSubtitlePath atomically:YES];
 }
 
 #endif

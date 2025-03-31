@@ -10,7 +10,7 @@
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
 
-@objc (VLCMediaScrubProgressBarDelegate)
+@objc(VLCMediaScrubProgressBarDelegate)
 protocol MediaScrubProgressBarDelegate: AnyObject {
     @objc optional func mediaScrubProgressBarShouldResetIdleTimer()
     func mediaScrubProgressBarSetPlaybackPosition(to value: Float)
@@ -18,7 +18,7 @@ protocol MediaScrubProgressBarDelegate: AnyObject {
     func mediaScrubProgressBarGetBMark() -> ABRepeatMarkView
 }
 
-@objc (VLCMediaScrubProgressBar)
+@objc(VLCMediaScrubProgressBar)
 class MediaScrubProgressBar: UIStackView {
     weak var delegate: MediaScrubProgressBarDelegate?
     private var playbackService = PlaybackService.sharedInstance()
@@ -109,9 +109,55 @@ class MediaScrubProgressBar: UIStackView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupViews()
+        initAccessibility()
 
         NotificationCenter.default.addObserver(self, selector: #selector(handleWillResignActive),
                                                name: UIApplication.willResignActiveNotification, object: nil)
+    }
+
+    private func initAccessibility() {
+        isAccessibilityElement = true
+        accessibilityLabel = NSLocalizedString("PLAYBACK_POSITION", comment: "")
+        accessibilityTraits = .updatesFrequently
+
+        let forward = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("FWD_BUTTON", comment: ""),
+                    image: .with(systemName: "plus.arrow.trianglehead.clockwise"),
+                    target: self,
+                    selector: #selector(handleAccessibilityForward))
+
+        let backward = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("BWD_BUTTON", comment: ""),
+                    image: .with(systemName: "minus.arrow.trianglehead.counterclockwise"),
+                    target: self,
+                    selector: #selector(handleAccessibilityBackward))
+
+        let timeDisplay = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("PLAYBACK_SCRUB_ACCESSIBILITY_TIME_DISPLAY", comment: ""),
+                    image: nil,
+                    target: self,
+                    selector: #selector(handleAccessibilityTimeDisplay))
+
+        accessibilityCustomActions = [forward, backward, timeDisplay]
+
+        updateAccessibilityValue()
+    }
+
+    @objc private func handleAccessibilityForward() -> Bool {
+        let defaults = UserDefaults.standard
+        playbackService.jumpForward(Int32(defaults.integer(forKey: kVLCSettingPlaybackForwardSkipLength)))
+        return true
+    }
+
+    @objc private func handleAccessibilityBackward() -> Bool {
+        let defaults = UserDefaults.standard
+        playbackService.jumpBackward(Int32(defaults.integer(forKey: kVLCSettingPlaybackBackwardSkipLength)))
+        return true
+    }
+
+    @objc private func handleAccessibilityTimeDisplay() -> Bool {
+        handleTimeDisplay()
+        return true
     }
 
     @objc func updateInterfacePosition() {
@@ -126,12 +172,19 @@ class MediaScrubProgressBar: UIStackView {
         updateCurrentTime()
 
         elapsedTimeLabel.setNeedsLayout()
+
+        updateAccessibilityValue()
     }
 
     func updateCurrentTime() {
-        let timeToDisplay = UserDefaults.standard.bool(forKey: kVLCShowRemainingTime)
-            ? playbackService.remainingTime().stringValue
-            : VLCTime(number: NSNumber.init(value:playbackService.mediaDuration)).stringValue
+        let timeToDisplay: String = {
+            switch RemainingTimeMode.current {
+            case .remaining:
+                return playbackService.remainingTime().stringValue
+            case .total:
+                return playbackService.mediaLength.stringValue
+            }
+        }()
 
         remainingTimeButton.setTitle(timeToDisplay, for: .normal)
         remainingTimeButton.setNeedsLayout()
@@ -148,7 +201,7 @@ class MediaScrubProgressBar: UIStackView {
             String(format: "%@: %@",
                    NSLocalizedString("PLAYBACK_POSITION", comment: ""),
                    newPosition.stringValue)
-        if UserDefaults.standard.bool(forKey: kVLCShowRemainingTime) {
+        if RemainingTimeMode.current == .remaining {
             let newRemainingTime = Int(newPosition.intValue) - playbackService.mediaDuration
             remainingTimeButton.setTitle(VLCTime(number: NSNumber.init(value: newRemainingTime)).stringValue, for: .normal)
             remainingTimeButton.setNeedsLayout()
@@ -285,12 +338,25 @@ private extension MediaScrubProgressBar {
         progressSlider.value = minPosition
     }
 
+    private func updateAccessibilityValue() {
+        switch RemainingTimeMode.current {
+        case .total:
+            accessibilityValue = String(format: NSLocalizedString("PLAYBACK_SCRUB_TOTAL_TIME_FORMAT", comment: "1: elapsed time, 2: total time"),
+                                        playbackService.playedTime().verboseStringValue,
+                                        playbackService.mediaLength.verboseStringValue)
+
+        case .remaining:
+            accessibilityValue = String(format: NSLocalizedString("PLAYBACK_SCRUB_REMAINING_TIME_FORMAT", comment: "1: elapsed time, 2: remaining time"),
+                                        playbackService.playedTime().verboseStringValue,
+                                        playbackService.remainingTime().verboseStringValue)
+
+        }
+    }
+
     // MARK: -
 
     @objc private func handleTimeDisplay() {
-        let userDefault = UserDefaults.standard
-        let currentSetting = userDefault.bool(forKey: kVLCShowRemainingTime)
-        userDefault.set(!currentSetting, forKey: kVLCShowRemainingTime)
+        RemainingTimeMode.toggle()
 
         updateCurrentTime()
         delegate?.mediaScrubProgressBarShouldResetIdleTimer?()
@@ -315,7 +381,7 @@ private extension MediaScrubProgressBar {
                        NSLocalizedString("PLAYBACK_POSITION", comment: ""),
                        newPosition.stringValue)
             // Update only remaining time and not media duration.
-            if UserDefaults.standard.bool(forKey: kVLCShowRemainingTime) {
+            if RemainingTimeMode.current == .remaining {
                 let newRemainingTime = Int(newPosition.intValue) - playbackService.mediaDuration
                 remainingTimeButton.setTitle(VLCTime(number: NSNumber.init(value:newRemainingTime)).stringValue,
                                              for: .normal)
@@ -341,5 +407,29 @@ private extension MediaScrubProgressBar {
 
     @objc private func handleWillResignActive() {
         progressSliderTouchUp()
+    }
+}
+
+// MARK: -
+
+fileprivate enum RemainingTimeMode {
+    case total
+    case remaining
+
+    static var current: RemainingTimeMode {
+        let userDefault = UserDefaults.standard
+        let currentSetting = userDefault.bool(forKey: kVLCShowRemainingTime)
+
+        switch currentSetting {
+            case true: return .remaining
+            case false: return .total
+        }
+    }
+
+    @discardableResult
+    static func toggle() -> RemainingTimeMode {
+        let userDefault = UserDefaults.standard
+        userDefault.set(!userDefault.bool(forKey: kVLCShowRemainingTime), forKey: kVLCShowRemainingTime)
+        return current
     }
 }

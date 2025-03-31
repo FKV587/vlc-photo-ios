@@ -27,7 +27,7 @@
 
 #import "NSString+SupportedMedia.h"
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 #import "VLC-Swift.h"
 #import "VLCMediaFileDiscoverer.h"
 #endif
@@ -181,12 +181,14 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
         _nameOfUsedNetworkInterface = preferredipv6Interface;
     }
     if (_nameOfUsedNetworkInterface == nil) {
+        APLog(@"No suitable interface was found");
         _isReachable = NO;
         [self changeHTTPServerState:NO];
         return;
     }
     _isReachable = YES;
     if (serverWasRunning) {
+        APLog(@"Server was running, restart");
         [self changeHTTPServerState:YES];
     }
 }
@@ -229,11 +231,12 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
 
 - (BOOL)changeHTTPServerState:(BOOL)state
 {
-    if (!state) {
+    /* if (!state) {
+        APLog(@"Stopping server");
         [_httpServer stop];
         [self endBackgroundTask];
         return true;
-    }
+    }*/
 
     if (_nameOfUsedNetworkInterface == nil) {
         APLog(@"No interface to listen on, server not started");
@@ -242,7 +245,7 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
         return NO;
     }
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
     // clean cache before accepting new stuff
     [self cleanCache];
 #endif
@@ -273,7 +276,7 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
     if (![_httpServer start:&error]) {
         if (error.code == EACCES) {
             APLog(@"Port forbidden by OS, trying another one");
-            [_httpServer setPort:8888];
+            [_httpServer setPort:0];
             if (![_httpServer start:&error]) {
                 [self beginBackgroundTask];
                 return true;
@@ -354,7 +357,7 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
     return [NSString stringWithFormat:@"%i", _httpServer.listeningPort];
 }
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 - (void)moveFileOutOfCache:(NSString *)filepath
 {
     NSString *fileName = [filepath lastPathComponent];
@@ -398,7 +401,11 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
     [fileManager moveItemAtPath:filepath toPath:finalFilePath error:&error];
     if (error) {
         APLog(@"Moving received media %@ to library folder failed (%li), deleting", fileName, (long)error.code);
-        [fileManager removeItemAtPath:filepath error:nil];
+        error = nil;
+        [fileManager removeItemAtPath:filepath error:&error];
+        if (error) {
+            APLog(@"Deleting media %@ failed (%li)", fileName, (long)error.code);
+        }
     }
 
     [[VLCMediaFileDiscoverer sharedInstance] performSelectorOnMainThread:@selector(updateMediaList) withObject:nil waitUntilDone:NO];
@@ -422,11 +429,13 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
 
     /* on tvOS, the media remains in the cache folder and will disappear from there
      * while on iOS we have persistent storage, so move it there */
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
     [self moveFileOutOfCache:filepath];
 #endif
 }
 
+#if TARGET_OS_IOS || TARGET_OS_VISION
+// never clean the cache on tvOS as we use it as a Documents folder replacement
 - (void)cleanCache
 {
     if ([[VLCActivityManager defaultManager] haveNetworkActivity])
@@ -440,7 +449,6 @@ NSString *VLCHTTPUploaderBackgroundTaskName = @"VLCHTTPUploaderBackgroundTaskNam
         [fileManager removeItemAtPath:uploadDirPath error:nil];
 }
 
-#if TARGET_OS_IOS
 - (void)resetIdleTimer
 {
     const int timeInterval = 4;

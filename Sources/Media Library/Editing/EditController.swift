@@ -167,7 +167,8 @@ private extension EditController {
 
 extension EditController: EditToolbarDelegate {
     private func getSelectedObjects() {
-        for index in selectedCellIndexPaths where index.row < currentDataSet.count {
+        let sortedSelectedCells = selectedCellIndexPaths.sorted()
+        for index in sortedSelectedCells where index.row < currentDataSet.count {
             if let mediaCollection = currentDataSet[index.row] as? MediaCollectionModel {
                 guard let files = mediaCollection.files() else {
                     assertionFailure("EditController: Fail to retrieve tracks.")
@@ -392,7 +393,9 @@ extension EditController: UICollectionViewDataSource {
             if let cell = cell as? MediaCollectionViewCell {
                 cell.showCheckmark(true)
                 cell.disableScrollView()
-                if let collectionModel = model as? CollectionModel, collectionModel.mediaCollection is VLCMLPlaylist {
+                if let collectionModel = model as? CollectionModel,
+                   collectionModel.mediaCollection is VLCMLPlaylist,
+                   collectionModel.sortModel.currentSort == .default {
                     cell.dragIndicatorImageView.isHidden = false
                 } else if cell.media is VLCMLMediaGroup || cell.media is VLCMLPlaylist {
                     cell.dragIndicatorImageView.isHidden = true
@@ -426,9 +429,12 @@ extension EditController: UICollectionViewDataSource {
     }
 
     func collectionView(_ collectionView: UICollectionView, canMoveItemAt indexPath: IndexPath) -> Bool {
-        if let collectionModel = model as? CollectionModel, collectionModel.mediaCollection is VLCMLPlaylist {
+        if let collectionModel = model as? CollectionModel,
+           collectionModel.mediaCollection is VLCMLPlaylist,
+           collectionModel.sortModel.currentSort == .default {
             return true
         }
+
         return false
     }
 
@@ -463,12 +469,7 @@ extension EditController: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView,
                         layout collectionViewLayout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        var toWidth = collectionView.frame.size.width
-        if #available(iOS 11.0, *) {
-            toWidth = collectionView.safeAreaLayoutGuide.layoutFrame.width
-        }
-
-        return model.cellType.cellSizeForWidth(toWidth)
+        model.cellType.cellSizeForWidth(collectionView.safeAreaLayoutGuide.layoutFrame.width)
     }
 
     func collectionView(_ collectionView: UICollectionView,

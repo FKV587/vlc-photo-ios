@@ -10,6 +10,11 @@
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
 
+extension Notification.Name {
+    static let VLCDidAppendMediaToQueue = Notification.Name("didAppendMediaToQueue")
+    static let VLCDidRemoveMediaFromQueue = Notification.Name("didRemoveMediaFromQueue")
+}
+
 @objc(VLCQueueViewControllerDelegate)
 protocol QueueViewControllerDelegate {
     @objc optional func queueViewControllerDidDisappear(_ queueViewController: QueueViewController?)
@@ -60,9 +65,10 @@ class QueueViewController: UIViewController {
             PlaybackService.sharedInstance()
         }
     }
+
     private var mediaList: VLCMediaList {
         get {
-            PlaybackService.sharedInstance().mediaList
+            playbackService.isShuffleMode ? PlaybackService.sharedInstance().shuffledList : PlaybackService.sharedInstance().mediaList
         }
     }
 
@@ -102,14 +108,22 @@ class QueueViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         initViews()
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(themeDidChange),
-                                               name: .VLCThemeDidChangeNotification,
-                                               object: nil)
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(deviceOrientationDidChange),
-                                               name: UIDevice.orientationDidChangeNotification,
-                                               object: nil)
+
+        let defaultCenter: NotificationCenter = NotificationCenter.default
+        defaultCenter.addObserver(self,
+                                  selector: #selector(themeDidChange),
+                                  name: .VLCThemeDidChangeNotification,
+                                  object: nil)
+#if os(iOS)
+        defaultCenter.addObserver(self,
+                                  selector: #selector(deviceOrientationDidChange),
+                                  name: UIDevice.orientationDidChangeNotification,
+                                  object: nil)
+#endif
+        defaultCenter.addObserver(self,
+                                  selector: #selector(reload),
+                                  name: Notification.Name(VLCPlaybackServiceShuffleModeUpdated),
+                                  object: nil)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -158,7 +172,7 @@ class QueueViewController: UIViewController {
                 if let parent = parent as? VideoPlayerViewController {
                     topConstraint = nil
                     heightConstraint = view.heightAnchor.constraint(equalTo: parent.view.heightAnchor,
-                                                                    constant: -(topConstraintConstant + parent.videoPlayerControls.frame.height + parent.scrubProgressBar.frame.height))
+                                                                    constant: -(topConstraintConstant + parent.videoPlayerControls.frame.height + parent.mediaScrubProgressBar.frame.height))
                     bottomConstraint = view.bottomAnchor.constraint(equalTo: parent.view.bottomAnchor,
                                                                     constant: self.view.frame.height)
                 } else if let parent = parent as? AudioPlayerViewController {
@@ -179,20 +193,15 @@ class QueueViewController: UIViewController {
 
             let leadingAnchor: NSLayoutXAxisAnchor
             let trailingAnchor: NSLayoutXAxisAnchor
-            if #available(iOS 11.0, *) {
-                let safeArea: UILayoutGuide
-                if let miniPlayerView = miniPlayerView {
-                    safeArea = miniPlayerView.safeAreaLayoutGuide
-                } else {
-                    safeArea = parent.view.safeAreaLayoutGuide
-                }
-
-                leadingAnchor = safeArea.leadingAnchor
-                trailingAnchor = safeArea.trailingAnchor
+            let safeArea: UILayoutGuide
+            if let miniPlayerView = miniPlayerView {
+                safeArea = miniPlayerView.safeAreaLayoutGuide
             } else {
-                leadingAnchor = parent.view.leadingAnchor
-                trailingAnchor = parent.view.trailingAnchor
+                safeArea = parent.view.safeAreaLayoutGuide
             }
+
+            leadingAnchor = safeArea.leadingAnchor
+            trailingAnchor = safeArea.trailingAnchor
 
             constraints = [
                 view.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -233,7 +242,9 @@ class QueueViewController: UIViewController {
         UIView.animate(withDuration: animationDuration, animations: {
             self.view.alpha = 1.0
             self.darkOverlayView.isHidden = false
-        })
+        }) { _ in
+            self.scrollToCurrentlyPlaying()
+        }
     }
 
     @objc func hide() {
@@ -248,20 +259,43 @@ class QueueViewController: UIViewController {
         })
     }
 
+    private func scrollToCurrentlyPlaying() {
+        guard let currentMedia = playbackService.currentlyPlayingMedia else {
+            return
+        }
+
+        let currentIndex = mediaList.index(of: currentMedia)
+
+        guard currentIndex != NSNotFound else {
+            return
+        }
+
+        guard currentIndex < mediaList.count else {
+            return
+        }
+
+        let currentIndexPath = IndexPath(row: Int(currentIndex), section: 0)
+
+        // Dispatch the scrolling operation to the main queue to ensure UI updates are processed first
+        DispatchQueue.main.async {
+            self.queueCollectionView.scrollToItem(at: currentIndexPath, at: .centeredVertically, animated: true)
+        }
+    }
+
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     @IBAction func didDrag(_ sender: UIPanGestureRecognizer) {
         switch sender.state {
-            case .began:
-                dragDidBegin(sender)
-            case .changed:
-                dragStateDidChange(sender)
-            case .ended:
-                dragDidEnd(sender)
-            default:
-                break
+        case .began:
+            dragDidBegin(sender)
+        case .changed:
+            dragStateDidChange(sender)
+        case .ended:
+            dragDidEnd(sender)
+        default:
+            break
         }
     }
 
@@ -308,11 +342,7 @@ class QueueViewController: UIViewController {
 
     @objc private func dismissPlayqueue() {
         if let parent = parent {
-            var newY: CGFloat = view.frame.height
-            if #available(iOS 11.0, *) {
-                newY -= view.safeAreaInsets.bottom
-            }
-            bottomConstraint?.constant = newY
+            bottomConstraint?.constant = view.frame.height - view.safeAreaInsets.bottom
             UIView.animate(withDuration: animationDuration, animations: {
                 parent.view.layoutIfNeeded()
             }, completion: { _ in
@@ -409,7 +439,9 @@ private extension QueueViewController {
 
 private extension QueueViewController {
     @objc private func themeDidChange() {
+#if os(iOS)
         setNeedsStatusBarAppearanceUpdate()
+#endif
     }
 
     private func updateCollectionViewCellApparence(_ cell: MediaCollectionViewCell, isSelected: Bool) {
@@ -437,8 +469,8 @@ private extension QueueViewController {
         switch gesture.state {
         case .began:
             guard let selectedIndexPath = queueCollectionView.indexPathForItem(at:
-                gesture.location(in: queueCollectionView)) else {
-                    break
+                                                                                gesture.location(in: queueCollectionView)) else {
+                break
             }
             queueCollectionView.beginInteractiveMovementForItem(at: selectedIndexPath)
             grabbedCellIndex = selectedIndexPath
@@ -489,14 +521,16 @@ extension QueueViewController: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView,
                         layout collectionViewLayout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        return MediaCollectionViewCell.cellSizeForWidth(collectionView.frame.width - (sidePadding * 2))
+        let padding = sidePadding + 5.0
+        return MediaCollectionViewCell.cellSizeForWidth(collectionView.frame.width - padding)
     }
 
     func collectionView(_ collectionView: UICollectionView,
                         layout collectionViewLayout: UICollectionViewLayout,
                         insetForSectionAt section: Int) -> UIEdgeInsets {
         let grabberHeight = topView.isHidden ? 0 : topView.frame.height
-        return UIEdgeInsets(top: topPadding + grabberHeight, left: sidePadding, bottom: bottomPadding, right: sidePadding)
+        let leftInset = 5.0
+        return UIEdgeInsets(top: topPadding + grabberHeight, left: leftInset, bottom: bottomPadding, right: sidePadding)
     }
 }
 
@@ -535,8 +569,11 @@ extension QueueViewController: UICollectionViewDelegate, MediaCollectionViewCell
             return
         }
         resetScrollView({ _ in
-            self.mediaList.removeMedia(at: UInt(indexPath.row))
-            self.reload()
+            let removedMedia = VLCMLMedia(forPlaying: self.mediaList.media(at: UInt(indexPath.row)))
+
+            NotificationCenter.default.post(name: .VLCDidRemoveMediaFromQueue, object: nil)
+
+            self.handleRemoveCurrentMediaIfNeeded(removedMedia, at: indexPath)
         })
     }
 
@@ -618,7 +655,7 @@ extension QueueViewController: UICollectionViewDataSource {
                         moveItemAt sourceIndexPath: IndexPath,
                         to destinationIndexPath: IndexPath) {
         guard sourceIndexPath.row <= mediaList.count
-            && destinationIndexPath.row <= mediaList.count else {
+                && destinationIndexPath.row <= mediaList.count else {
             assertionFailure("QueueViewController: moveItemAt: IndexPath out of range.")
             return
         }
@@ -636,9 +673,9 @@ extension QueueViewController: UICollectionViewDataSource {
     func collectionView(_ collectionView: UICollectionView,
                         cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         guard let cell =
-            collectionView.dequeueReusableCell(withReuseIdentifier: MediaCollectionViewCell.defaultReuseIdentifier,
-                                               for: indexPath) as? MediaCollectionViewCell else {
-                                                return UICollectionViewCell()
+                collectionView.dequeueReusableCell(withReuseIdentifier: MediaCollectionViewCell.defaultReuseIdentifier,
+                                                   for: indexPath) as? MediaCollectionViewCell else {
+            return UICollectionViewCell()
         }
 
         guard indexPath.row <= mediaList.count else {
@@ -676,6 +713,43 @@ extension QueueViewController: UICollectionViewDataSource {
         cell.newLabel.isHidden = true
 
         return cell
+    }
+}
+
+// MARK: - Media Collection View Cell Queue Remove/ Empty Media List handler
+
+extension QueueViewController {
+    func handleRemoveCurrentMediaIfNeeded(_ media: VLCMLMedia?, at index: IndexPath) {
+        guard mediaList.count > 1,
+              let currentMedia = VLCMLMedia(forPlaying: playbackService.currentlyPlayingMedia),
+              let mlMedia = media,
+              mlMedia.identifier() == currentMedia.identifier() else {
+            performDeleteMediaFromQueue(at: index)
+            return
+        }
+
+        let repeatMode = playbackService.repeatMode
+
+        // avoiding UI Crash when removing the last index in the media list
+        if (repeatMode == .doNotRepeat || repeatMode == .repeatCurrentItem) &&
+            index.row == mediaList.count - 1 {
+            performDeleteMediaFromQueue(at: index, isLastMedia: true)
+        } else {
+            performDeleteMediaFromQueue(at: index)
+        }
+    }
+
+    func performDeleteMediaFromQueue(at index: IndexPath, isLastMedia: Bool = false) {
+        // handle removing last media
+        if isLastMedia {
+            // cases of doNotReapeat and repeatCurrentItem using the next() method causes wrong updates in the collection view which breaks the UI.
+            // playing the index - 1 is the solution for this case
+            self.mediaList.removeMedia(at: UInt(index.row))
+            playbackService.playItem(at: UInt(index.row - 1))
+        } else {
+            // removes the media form the media list and updates the currentIndex, then plays the next
+            playbackService.removeMediaFromMediaList(at: UInt(index.row))
+        }
     }
 }
 

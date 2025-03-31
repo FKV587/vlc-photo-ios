@@ -25,7 +25,7 @@
 {
     self = [super init];
     if (self) {
-        _name = @"Generic";
+        _name = @"";
         _loginItem = [[VLCLocalNetworkServiceItemLogin alloc] initWithServiceName:_name];
     }
     return self;

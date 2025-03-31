@@ -39,12 +39,10 @@
 
     self.navigationItem.titleView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"OneDriveWhite"]];
 
-#if TARGET_OS_IOS
     [self.cloudStorageLogo setImage:[UIImage imageNamed:@"OneDriveWhite"]];
 
     [self.cloudStorageLogo sizeToFit];
     self.cloudStorageLogo.center = self.view.center;
-#endif
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -229,49 +227,31 @@
 
 #pragma mark - cell delegation
 
-#if TARGET_OS_IOS
 - (void)triggerDownloadForCell:(VLCCloudStorageTableViewCell *)cell
 {
     NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
     ODItem *selectedItem = _oneDriveController.currentListFiles[indexPath.row];
 
-    if (selectedItem.size < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        /* selected item is a proper file, ask the user if s/he wants to download it */
-        UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
-                                                                                 message:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil),
-                                                                                          selectedItem.name,
-                                                                                          [[UIDevice currentDevice] model]]
-                                                                          preferredStyle:UIAlertControllerStyleAlert];
+    /* selected item is a proper file, ask the user if s/he wants to download it */
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
+                                                                             message:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil),
+                                                                                      selectedItem.name,
+                                                                                      [[UIDevice currentDevice] model]]
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
 
-        UIAlertAction *downloadAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
-                                                           style:UIAlertActionStyleDefault
-                                                         handler:^(UIAlertAction *alertAction){
-                                                             [self->_oneDriveController startDownloadingODItem:selectedItem];
-                                                         }];
-        UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_CANCEL", nil)
-                                                               style:UIAlertActionStyleCancel
-                                                             handler:nil];
+    UIAlertAction *downloadAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
+                                                             style:UIAlertActionStyleDefault
+                                                           handler:^(UIAlertAction *alertAction){
+        [self->_oneDriveController startDownloadingODItem:selectedItem];
+    }];
+    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_CANCEL", nil)
+                                                           style:UIAlertActionStyleCancel
+                                                         handler:nil];
 
 
-        [alertController addAction:downloadAction];
-        [alertController addAction:cancelAction];
-        [self presentViewController:alertController animated:YES completion:nil];
-    } else {
-        UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
-                                                                                 message:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil),
-                                                                                          selectedItem.name,
-                                                                                          [[UIDevice currentDevice] model]]
-                                                                          preferredStyle:UIAlertControllerStyleAlert];
-
-        UIAlertAction *okAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_OK", nil)
-                                                                 style:UIAlertActionStyleCancel
-                                                               handler:nil];
-
-        [alertController addAction:okAction];
-        [self presentViewController:alertController animated:YES completion:nil];
-    }
+    [alertController addAction:downloadAction];
+    [alertController addAction:cancelAction];
+    [self presentViewController:alertController animated:YES completion:nil];
 }
-
-#endif
 
 @end

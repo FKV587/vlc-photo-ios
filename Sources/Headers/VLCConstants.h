@@ -12,8 +12,7 @@
  *****************************************************************************/
 
 #define kVLCSettingPasscodeOnKey @"PasscodeProtection"
-#define kVLCSettingPasscodeAllowTouchID @"AllowTouchID"
-#define kVLCSettingPasscodeAllowFaceID @"AllowFaceID"
+#define kVLCSettingPasscodeEnableBiometricAuth @"EnableBiometricAuth"
 #define kVLCSettingHideLibraryInFilesApp @"HideLibraryInFilesApp"
 #define kVLCThemeDidChangeNotification @"themeDidChangeNotfication"
 #define kVLCSettingAppTheme @"darkMode"
@@ -25,6 +24,9 @@
 #define kVLCSettingAbout @"about"
 #define kVLCAutomaticallyPlayNextItem @"AutomaticallyPlayNextItem"
 #define kVLCPlaylistPlayNextItem @"PlaylistPlayNextItem"
+#define kVLCLastPlayedPlaylist @"LastPlayedPlaylist"
+#define kVLCIsCurrentlyPlayingPlaylist @"isPlaylistCurrentlyPlaying"
+#define kVLCCurrentPlaylistMediasQueue @"currentPlaylistMediasQueue"
 #define kVLCSettingEnableMediaCellTextScrolling @"EnableMediaCellTextScrolling"
 #define kVLCSettingContinueAudioInBackgroundKey @"BackgroundAudioPlayback"
 #define kVLCSettingStretchAudio @"audio-time-stretch"
@@ -49,6 +51,7 @@
 #define kVLCSettingDeinterlaceDefaultValue @(-1)
 #define kVLCSettingHardwareDecoding @"codec"
 #define kVLCSettingHardwareDecodingDefault @""
+#define kVLCSettingRotationLock @"kVLCSettingRotationLock"
 #define kVLCSettingNetworkCaching @"network-caching"
 #define kVLCSettingNetworkCachingDefaultValue @(999)
 #define kVLCSettingNetworkRTSPTCP @"rtsp-tcp"
@@ -80,7 +83,10 @@
 #define kVLCSettingPlaybackForwardSkipLengthSwipe @"playback-forward-skip-length-swipe"
 #define kVLCSettingPlaybackForwardSkipLengthSwipeDefaultValue @(10)
 #define kVLCSettingPlaybackBackwardSkipLengthSwipe @"playback-backward-skip-length-swipe"
+#define kVLCSettingPlaybackLongTouchSpeedUp @"LongTouchSpeedUp"
 #define kVLCSettingPlaybackBackwardSkipLengthSwipeDefaultValue @(10)
+#define kVLCSettingPlaybackLockscreenSkip @"playback-lockscreen-skip"
+#define kVLCSettingPlaybackRemoteControlSkip @"playback-remote-control-skip"
 #define kVLCSettingOpenAppForPlayback @"open-app-for-playback"
 #define kVLCSettingOpenAppForPlaybackDefaultValue @YES
 #define kVLCSettingShowThumbnails @"ShowThumbnails"
@@ -95,6 +101,11 @@
 #define kVLCSettingBackupMediaLibraryDefaultValue @NO
 #define kVLCSettingLastUsedSubtitlesSearchLanguage @"kVLCSettingLastUsedSubtitlesSearchLanguage"
 #define kVLCResetSettings @"kVLCResetSettings"
+#define kVLCSettingAlwaysPlayURLs @"kVLCSettingAlwaysPlayURLs"
+#define kVLCSettingDisableSubtitles @"kVLCSettingDisableSubtitles"
+#define kVLCSettingPlayerControlDuration @"kVLCSettingPlayerControlDuration"
+#define kVLCSettingPlayerControlDurationDefaultValue @(4)
+#define kVLCSettingPauseWhenShowingControls @"kVLCSettingPauseWhenShowingControls"
 
 #define kVLCForceSMBV1 @"smb-force-v1"
 
@@ -109,6 +120,10 @@
 #define kVLCAudioLibraryHideTrackNumbers @"kVLCAudioLibraryHideTrackNumbers"
 #define kVLCVideoLibraryGridLayout @"kVLCVideoLibraryGridLayout"
 
+#define kVLCLastPlayedMediaIdentifier @"LastPlayedMediaIdentifier"
+#define kVLCRestoreLastPlayedMedia @"RestoreLastPlayedMedia"
+
+#define kVLCPlayerOpenInMiniPlayer @"OpenInMiniPlayer"
 #define kVLCPlayerShouldRememberState @"PlayerShouldRememberState"
 #define kVLCPlayerShouldRememberBrightness @"PlayerShouldRememberBrightness"
 #define KVLCPlayerBrightness @"playerbrightness"
@@ -118,9 +133,12 @@
 #define kVLCPlayerIsRepeatEnabledDefaultValue @(0)
 #define kVLCPlayerShowPlaybackSpeedShortcut @"kVLCPlayerShowPlaybackSpeedShortcut"
 
+#define kVLCCustomProfileEnabled @"kVLCCustomProfileEnabled"
+#define kVLCCustomEqualizerProfiles @"kVLCCustomEqualizerProfiles"
+
 #define kSupportedFileExtensions @"\\.(669|3g2|3gp|3gp2|3gpp|amv|asf|avi|bik|bin|crf|divx|drc|dv|evo|f4v|far|flv|gvi|gxf|hevc|iso|it|m1v|m2v|m2t|m2ts|m4v|mkv|mov|mp2|mp2v|mp4|mp4v|mpe|mpeg|mpeg1|mpeg2|mpeg4|mpg|mpv2|mtm|mts|mtv|mxf|mxg|nsv|nuv|ogg|ogm|ogv|ogx|ps|rec|rm|rmvb|rpl|s3m|thp|tod|ts|tts|txd|vlc|vob|vro|webm|wm|wmv|wtv|xesc|xm)$"
 #define kSupportedSubtitleFileExtensions @"\\.(cdg|idx|srt|sub|utf|ass|ssa|aqt|jss|psb|rt|smi|txt|smil|stl|usf|dks|pjs|mpl2|mks|vtt|ttml|dfxp)$"
-#define kSupportedAudioFileExtensions @"\\.(3ga|669|a52|aac|ac3|adt|adts|aif|aifc|aiff|amb|amr|aob|ape|au|awb|caf|dts|flac|it|kar|m4a|m4b|m4p|m5p|mid|mka|mlp|mod|mpa|mp1|mp2|mp3|mpc|mpga|mus|oga|ogg|oma|opus|qcp|ra|rmi|s3m|sid|spx|tak|thd|tta|voc|vqf|w64|wav|wma|wv|xa|xm)$"
+#define kSupportedAudioFileExtensions @"\\.(3ga|669|a52|aa3|aac|ac3|adt|adts|aif|aifc|aiff|amb|amr|aob|ape|at3|au|awb|caf|dts|flac|it|kar|m4a|m4b|m4p|m5p|mid|mka|mlp|mod|mpa|mp1|mp2|mp3|mpc|mpga|mus|oga|ogg|oma|opus|qcp|ra|rmi|s3m|sid|spx|tak|thd|tta|voc|vqf|w64|wav|wma|wv|xa|xm)$"
 #define kSupportedPlaylistFileExtensions @"\\.(asx|b4s|cue|ifo|m3u|m3u8|pls|ram|rar|sdp|vlc|xspf|wax|wvx|zip|conf)$"
 
 #define kSupportedProtocolSchemes @"(rtsp|mms|mmsh|udp|rtp|rtmp|sftp|ftp|smb)$"
@@ -155,12 +173,17 @@
 #define kVLCSortDefault @"SortDefault"
 #define kVLCSortDescendingDefault @"SortDescendingDefault"
 #define kVLCHasLaunchedBefore @"hasLaunchedBefore"
+#define kVLCHasNaggedThisMonth @"kVLCHasNaggedThisMonth"
+#define kVLCNumberOfLaunches @"kVLCNumberOfLaunches"
+#define kVLCHasActiveSubscription @"kVLCHasActiveSubscription"
 
 #define kVLCTabBarIndex @"TabBarIndex"
 
 #define kVLCGroupLayout @"kVLCGroupLayout"
 
 #define kVLCEqualizerSnapBands @"EqualizerSnapBands"
+
+#define kVLCDonationAnonymousCustomerID @"kVLCDonationAnonymousCustomerID"
 
 /* LEGACY KEYS, DO NOT USE IN NEW CODE */
 #define kVLCFTPServer @"ftp-server"

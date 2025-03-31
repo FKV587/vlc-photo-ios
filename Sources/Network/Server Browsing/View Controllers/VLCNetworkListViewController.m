@@ -31,7 +31,13 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
 
 - (void)loadView
 {
-    _tableView = [[UITableView alloc] initWithFrame:[UIScreen mainScreen].bounds style:UITableViewStylePlain];
+    CGRect initialRect;
+#if TARGET_OS_IOS
+    initialRect = [UIScreen mainScreen].bounds;
+#else
+    initialRect = [[[[UIApplication sharedApplication] delegate] window] bounds];
+#endif
+    _tableView = [[UITableView alloc] initWithFrame:initialRect style:UITableViewStylePlain];
     _tableView.backgroundColor = PresentationTheme.current.colors.background;
     CGRect frame = _tableView.bounds;
     frame.origin.y = -frame.size.height;
@@ -46,7 +52,11 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
     _tableView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
     self.view = _tableView;
 
+#if TARGET_OS_IOS
     _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+#else
+    _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+#endif
     _activityIndicator.center = _tableView.center;
     _activityIndicator.color = PresentationTheme.current.colors.orangeUI;
     _activityIndicator.autoresizingMask = UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin;
@@ -66,7 +76,7 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
     _searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     _searchController.searchResultsUpdater = self;
     _searchController.delegate = self;
-    _searchController.dimsBackgroundDuringPresentation = NO;
+    _searchController.obscuresBackgroundDuringPresentation = NO;
 
     _searchController.searchBar.delegate = self;
     _searchController.searchBar.barTintColor = navBar.barTintColor;
@@ -74,7 +84,7 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
     _searchController.searchBar.translucent = navBar.translucent;
     _searchController.searchBar.opaque = navBar.opaque;
     [_searchController.searchBar sizeToFit];
-    if (@available(iOS 11.0, *)) {
+    if (@available(iOS 11.0 VISIONOS_AVAILABLE, *)) {
         // search bar text field background color
         UITextField *searchTextField = [_searchController.searchBar valueForKey:@"searchField"];
         UIView *backgroundView = searchTextField.subviews.firstObject;
@@ -91,7 +101,7 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
     }
     self.definesPresentationContext = YES;
 
-    self.navigationItem.rightBarButtonItems = @[[UIBarButtonItem themedPlayAllButtonWithTarget:self andSelector:@selector(playAllAction:)]];
+    [self addPlayAllAction];
 
     _searchData = [[NSMutableArray alloc] init];
     [_searchData removeAllObjects];
@@ -100,7 +110,7 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
 - (void)viewWillAppear:(BOOL)animated
 {
     [super viewWillAppear:animated];
-    if (@available(iOS 11.0, *)) {
+    if (@available(iOS 11.0 VISIONOS_AVAILABLE, *)) {
         //iOS 11
     } else {
         CGPoint contentOffset = CGPointMake(0, _tableView.tableHeaderView.bounds.size.height);
@@ -115,6 +125,7 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
         [self setEditing:NO animated:YES];
 }
 
+#if TARGET_OS_IOS
 - (BOOL)shouldAutorotate
 {
     UIInterfaceOrientation toInterfaceOrientation = [[UIApplication sharedApplication] statusBarOrientation];
@@ -122,6 +133,7 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
         return NO;
     return YES;
 }
+#endif
 
 - (IBAction)playAllAction:(id)sender
 {
@@ -136,6 +148,16 @@ NSString *VLCNetworkListCellIdentifier = @"VLCNetworkListCellIdentifier";
 - (void)stopActivityIndicator
 {
     [_activityIndicator stopAnimating];
+}
+
+- (void)addPlayAllAction
+{
+    self.navigationItem.rightBarButtonItems = @[[UIBarButtonItem themedPlayAllButtonWithTarget:self andSelector:@selector(playAllAction:)]];
+}
+
+- (void)removePlayAllAction
+{
+    self.navigationItem.rightBarButtonItems = @[];
 }
 
 #pragma mark - Table view data source

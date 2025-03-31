@@ -171,7 +171,7 @@ extension VLCMLMedia {
     }
 
     func updateCoreSpotlightEntry() {
-        if !KeychainCoordinator.passcodeLockEnabled {
+        if !KeychainCoordinator.passcodeService.hasSecret {
             let groupIdentifier = ProcessInfo.processInfo.environment["GROUP_IDENTIFIER"]
             let item = CSSearchableItem(uniqueIdentifier: "\(identifier())", domainIdentifier: groupIdentifier, attributeSet: coreSpotlightAttributeSet())
             CSSearchableIndex.default().indexSearchableItems([item], completionHandler: nil)
@@ -184,13 +184,13 @@ extension VLCMLMedia: SearchableMLModel {
     func contains(_ searchString: String) -> Bool {
         var matches = false
 
-        if subtype() == .albumTrack {
-            matches = matches || artist?.contains(searchString) ?? false
-            matches = matches || genre?.contains(searchString) ?? false
-            matches = matches || album?.contains(searchString) ?? false
-        }
+        matches = matches || search(searchString, in: title)
 
-        matches = matches || title.lowercased().contains(searchString)
+        if subtype() == .albumTrack {
+            matches = matches || search(searchString, in: artist?.name ?? "")
+            matches = matches || search(searchString, in: genre?.name ?? "")
+            matches = matches || search(searchString, in: album?.title ?? "")
+        }
 
         return matches
     }

@@ -19,95 +19,33 @@ import MediaPlayer
 protocol VideoPlayerViewControllerDelegate: AnyObject {
     func videoPlayerViewControllerDidMinimize(_ videoPlayerViewController: VideoPlayerViewController)
     func videoPlayerViewControllerShouldBeDisplayed(_ videoPlayerViewController: VideoPlayerViewController) -> Bool
-}
-
-enum VideoPlayerSeekState {
-    case `default`
-    case forward
-    case backward
-}
-
-enum VideoPlayerPanType {
-    case none
-    case brightness
-    case volume
-    case projection
+    func videoPlayerViewControllerShouldSwitchPlayer(_ videoPlayerViewController: VideoPlayerViewController)
 }
 
 @objc(VLCVideoPlayerViewController)
-class VideoPlayerViewController: UIViewController {
+class VideoPlayerViewController: PlayerViewController {
     @objc weak var delegate: VideoPlayerViewControllerDelegate?
 
     var playAsAudio: Bool = false
-
-    /* This struct is a small data container used for brightness and volume
-     * gesture value persistance
-     * It helps to keep their values around when they can't be get from/set to APIs
-     * unavailable on simulator
-     * This is a quick workaround and this should be refactored at some point
-     */
-    struct SliderGestureControl {
-        private var deviceSetter: (Float) -> Void
-        private let deviceGetter: () -> Float
-        var value: Float = 0.5
-        let speed: Float = UIDevice.current.userInterfaceIdiom == UIUserInterfaceIdiom.pad ? 1.0 / 70000 : 1.0 / 20000
-        init(deviceSetter: @escaping (Float) -> Void, deviceGetter: @escaping () -> Float) {
-            self.deviceGetter = deviceGetter
-            self.deviceSetter = deviceSetter
-            self.fetchDeviceValue()
-        }
-
-        mutating func fetchDeviceValue() -> Void {
-#if !targetEnvironment(simulator)
-            self.value = deviceGetter()
-#endif
-        }
-
-        mutating func fetchAndGetDeviceValue() -> Float {
-            self.fetchDeviceValue()
-            return self.value
-        }
-
-        mutating func applyValueToDevice() -> Void {
-#if !targetEnvironment(simulator)
-            deviceSetter(self.value)
-#endif
-        }
-    }
-
-    private lazy var brightnessControl: SliderGestureControl = {
-        return SliderGestureControl { value in
-            UIScreen.main.brightness = CGFloat(value)
-        } deviceGetter: {
-            return Float(UIScreen.main.brightness)
-        }
-    }()
-    private lazy var volumeControl: SliderGestureControl = {
-        return SliderGestureControl { [weak self] value in
-            self?.volumeView.setVolume(value)
-        } deviceGetter: {
-            return AVAudioSession.sharedInstance().outputVolume
-        }
-    }()
-
-    let volumeView = MPVolumeView(frame: .zero)
-
-    private var mediaLibraryService: MediaLibraryService
-    private var rendererDiscovererManager: VLCRendererDiscovererManager
-
-    private(set) var playerController: PlayerController
-
-    private(set) var playbackService: PlaybackService = PlaybackService.sharedInstance()
 
     // MARK: - Constants
 
     private let ZOOM_SENSITIVITY: CGFloat = 5
 
+#if os(iOS)
     private let screenPixelSize = CGSize(width: UIScreen.main.bounds.width,
                                          height: UIScreen.main.bounds.height)
+#else
+    private let screenPixelSize: CGSize = {
+        return UIApplication.shared.delegate?.window??.bounds.size
+    }()!
+#endif
 
     // MARK: - Private
-    private var systemBrightness: Double?
+    /// Stores previous playback speed for long press gesture
+    /// to be able to restore playback speed to its previous state after long press ended.
+    private var previousPlaybackSpeed: Float?
+
     // MARK: - 360
 
     private var fov: CGFloat = 0
@@ -119,7 +57,7 @@ class VideoPlayerViewController: UIViewController {
 
     private var orientations = UIInterfaceOrientationMask.allButUpsideDown
 
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+    @objc override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         get { return self.orientations }
         set { self.orientations = newValue }
     }
@@ -127,18 +65,6 @@ class VideoPlayerViewController: UIViewController {
     override var prefersHomeIndicatorAutoHidden: Bool {
         return true
     }
-
-    // MARK: - Seek
-   
-    private var numberOfGestureSeek: Int = 0
-    private var totalSeekDuration: Int = 0
-    private var previousSeekState: VideoPlayerSeekState = .default
-    var tapSwipeEqual: Bool = true
-    var forwardBackwardEqual: Bool = true
-    var seekForwardBy: Int = 0
-    var seekBackwardBy: Int = 0
-    var seekForwardBySwipe: Int = 0
-    var seekBackwardBySwipe: Int = 0
 
     // MARK: - UI elements
 
@@ -148,6 +74,7 @@ class VideoPlayerViewController: UIViewController {
 
     private var idleTimer: Timer?
 
+#if os(iOS)
     override var prefersStatusBarHidden: Bool {
         if UIDevice.current.userInterfaceIdiom == UIUserInterfaceIdiom.pad && !playerController.isControlsHidden {
             return false
@@ -157,6 +84,7 @@ class VideoPlayerViewController: UIViewController {
         }
         return true
     }
+#endif
 
     override var next: UIResponder? {
         get {
@@ -173,15 +101,6 @@ class VideoPlayerViewController: UIViewController {
         return .fade
     }
 
-    private lazy var layoutGuide: UILayoutGuide = {
-        var layoutGuide = view.layoutMarginsGuide
-
-        if #available(iOS 11.0, *) {
-            layoutGuide = view.safeAreaLayoutGuide
-        }
-        return layoutGuide
-    }()
-
     private lazy var videoOutputViewLeadingConstraint: NSLayoutConstraint = {
         let videoOutputViewLeadingConstraint = videoOutputView.leadingAnchor.constraint(equalTo: view.leadingAnchor)
         return videoOutputViewLeadingConstraint
@@ -190,22 +109,6 @@ class VideoPlayerViewController: UIViewController {
     private lazy var videoOutputViewTrailingConstraint: NSLayoutConstraint = {
         let videoOutputViewTrailingConstraint = videoOutputView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         return videoOutputViewTrailingConstraint
-    }()
-
-    private lazy var mediaNavigationBar: MediaNavigationBar = {
-        var mediaNavigationBar = MediaNavigationBar(frame: .zero,
-                                                    rendererDiscovererService: rendererDiscovererManager)
-        mediaNavigationBar.delegate = self
-        mediaNavigationBar.presentingViewController = self
-        mediaNavigationBar.chromeCastButton.isHidden =
-            self.playbackService.renderer == nil
-        return mediaNavigationBar
-    }()
-
-    private lazy var optionsNavigationBar: OptionsNavigationBar = {
-        var optionsNavigationBar = OptionsNavigationBar()
-        optionsNavigationBar.delegate = self
-        return optionsNavigationBar
     }()
 
     private(set) lazy var videoPlayerControls: VideoPlayerControls = {
@@ -233,32 +136,6 @@ class VideoPlayerViewController: UIViewController {
         return videoPlayerControls
     }()
 
-    private(set) lazy var scrubProgressBar: MediaScrubProgressBar = {
-        var scrubProgressBar = MediaScrubProgressBar()
-        scrubProgressBar.delegate = self
-        return scrubProgressBar
-    }()
-
-    private var abRepeatView: ABRepeatView?
-
-    private lazy var aMark: ABRepeatMarkView = {
-        let aMark = ABRepeatMarkView(icon: UIImage(named: "abRepeatMarkerFill"))
-        aMark.translatesAutoresizingMaskIntoConstraints = false
-        return aMark
-    }()
-
-    private lazy var bMark: ABRepeatMarkView = {
-        let bMark = ABRepeatMarkView(icon: UIImage(named: "abRepeatMarkerFill"))
-        bMark.translatesAutoresizingMaskIntoConstraints = false
-        return bMark
-    }()
-
-    private(set) lazy var moreOptionsActionSheet: MediaMoreOptionsActionSheet = {
-        var moreOptionsActionSheet = MediaMoreOptionsActionSheet()
-        moreOptionsActionSheet.moreOptionsDelegate = self
-        return moreOptionsActionSheet
-    }()
-
     private(set) lazy var aspectRatioActionSheet: MediaPlayerActionSheet = {
         var aspectRatioActionSheet = MediaPlayerActionSheet()
         aspectRatioActionSheet.dataSource = self
@@ -268,101 +145,39 @@ class VideoPlayerViewController: UIViewController {
         return aspectRatioActionSheet
     }()
 
-    private var queueViewController: QueueViewController?
-    private var alertController: UIAlertController?
-    private var rendererButton: UIButton?
     let notificationCenter = NotificationCenter.default
 
     private(set) lazy var titleSelectionView: TitleSelectionView = {
+#if os(iOS)
         let isLandscape = UIDevice.current.orientation.isLandscape
         let titleSelectionView = TitleSelectionView(frame: .zero,
                                                     orientation: isLandscape ? .horizontal : .vertical)
+#else
+        let titleSelectionView = TitleSelectionView(frame: .zero, orientation: .horizontal)
+#endif
         titleSelectionView.delegate = self
         titleSelectionView.isHidden = true
         return titleSelectionView
     }()
 
-    private var currentPanType: VideoPlayerPanType = .none
-
     private var projectionLocation: CGPoint = .zero
 
+    private lazy var longPressPlaybackSpeedView: LongPressPlaybackSpeedView = {
+        let view = LongPressPlaybackSpeedView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+
+        view.layer.opacity = 0
+
+        return view
+    }()
+
+
     // MARK: - VideoOutput
-
-    private lazy var statusLabel: VLCStatusLabel = {
-        var statusLabel = VLCStatusLabel()
-        statusLabel.isHidden = true
-        statusLabel.textColor = .white
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        return statusLabel
-    }()
-
-    private lazy var volumeBackgroundGradientLayer: CAGradientLayer = {
-        let volumeBackGroundGradientLayer = CAGradientLayer()
-
-        volumeBackGroundGradientLayer.frame = UIScreen.main.bounds
-        volumeBackGroundGradientLayer.colors = [UIColor.clear.cgColor,
-                                                UIColor.clear.cgColor,
-                                                UIColor.clear.cgColor,
-                                                UIColor.black.cgColor]
-        volumeBackGroundGradientLayer.locations = [0, 0.2, 0.8, 1]
-        volumeBackGroundGradientLayer.transform = CATransform3DMakeRotation(-CGFloat.pi / 2, 0, 0, 1)
-        volumeBackGroundGradientLayer.isHidden = true
-        return volumeBackGroundGradientLayer
-    }()
-
-    private lazy var brightnessBackgroundGradientLayer: CAGradientLayer = {
-        let brightnessGroundGradientLayer = CAGradientLayer()
-
-        brightnessGroundGradientLayer.frame = UIScreen.main.bounds
-        brightnessGroundGradientLayer.colors = [UIColor.clear.cgColor,
-                                                UIColor.clear.cgColor,
-                                                UIColor.clear.cgColor,
-                                                UIColor.black.cgColor]
-        brightnessGroundGradientLayer.locations = [0, 0.2, 0.8, 1]
-        brightnessGroundGradientLayer.transform = CATransform3DMakeRotation(CGFloat.pi / 2, 0, 0, 1)
-        brightnessGroundGradientLayer.isHidden = true
-        return brightnessGroundGradientLayer
-    }()
-
-    private lazy var brightnessControlView: BrightnessControlView = {
-        let vc = BrightnessControlView()
-        let defaults = UserDefaults.standard
-        if defaults.bool(forKey: kVLCPlayerShouldRememberBrightness) {
-            if let brightness = defaults.value(forKey: KVLCPlayerBrightness) as? Float {
-                vc.updateIcon(level:brightness)
-            } else {
-                vc.updateIcon(level:brightnessControl.fetchAndGetDeviceValue())
-            }
-        } else {
-            vc.updateIcon(level:brightnessControl.fetchAndGetDeviceValue())
-        }
-        vc.translatesAutoresizingMaskIntoConstraints = false
-        vc.alpha = 0
-        return vc
-    }()
-
-    private lazy var volumeControlView: VolumeControlView = {
-        let vc = VolumeControlView(volumeView: self.volumeView)
-        vc.updateIcon(level: volumeControl.fetchAndGetDeviceValue())
-        vc.translatesAutoresizingMaskIntoConstraints = false
-        vc.alpha = 0
-        return vc
-    }()
-
-    private lazy var sideBackgroundGradientView: UIView = {
-        let backgroundGradientView = UIView()
-        backgroundGradientView.frame = UIScreen.main.bounds
-        backgroundGradientView.autoresizingMask = [.flexibleHeight, .flexibleWidth]
-
-        backgroundGradientView.layer.addSublayer(brightnessBackgroundGradientLayer)
-        backgroundGradientView.layer.addSublayer(volumeBackgroundGradientLayer)
-        return backgroundGradientView
-    }()
 
     private lazy var topBottomBackgroundGradientLayer: CAGradientLayer = {
         let topBottomBackgroundGradientLayer = CAGradientLayer()
 
-        topBottomBackgroundGradientLayer.frame = UIScreen.main.bounds
+        topBottomBackgroundGradientLayer.frame = self.view.bounds
         topBottomBackgroundGradientLayer.colors = [UIColor.black.cgColor,
                                                    UIColor.clear.cgColor,
                                                    UIColor.clear.cgColor,
@@ -373,16 +188,19 @@ class VideoPlayerViewController: UIViewController {
 
     private lazy var backgroundGradientView: UIView = {
         let backgroundGradientView = UIView()
-        backgroundGradientView.frame = UIScreen.main.bounds
+        backgroundGradientView.frame = self.view.bounds
         backgroundGradientView.autoresizingMask = [.flexibleHeight, .flexibleWidth]
         backgroundGradientView.layer.addSublayer(topBottomBackgroundGradientLayer)
         return backgroundGradientView
     }()
 
     private var artWorkImageView: UIImageView = {
-        let artWorkImageView = UIImageView()
-        artWorkImageView.frame.size.width = UIScreen.main.bounds.width * 0.6
-        artWorkImageView.frame.size.height = UIScreen.main.bounds.width * 0.6
+#if os(iOS)
+        let frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width * 0.6, height: UIScreen.main.bounds.width * 0.6)
+#else
+        let frame = UIApplication.shared.delegate!.window!!.bounds
+#endif
+        let artWorkImageView = UIImageView(frame: frame)
         artWorkImageView.autoresizingMask = [.flexibleBottomMargin, .flexibleTopMargin, .flexibleLeftMargin, .flexibleRightMargin]
         return artWorkImageView
     }()
@@ -404,6 +222,24 @@ class VideoPlayerViewController: UIViewController {
         return videoOutputView
     }()
 
+    /// An invisible button that resides in the middle of the screen which
+    /// Switch Control will focus on when it is in Item mode. Tapping it will
+    /// present the player controls.
+    ///
+    /// Without this, Switch Control uses Point mode, which is cumbersome.
+    private var switchControlUtility: UIControl = {
+        var switchControlUtility = UIControl()
+        switchControlUtility.backgroundColor = .clear
+        switchControlUtility.translatesAutoresizingMaskIntoConstraints = false
+        switchControlUtility.isUserInteractionEnabled = true
+        switchControlUtility.isAccessibilityElement = true
+        switchControlUtility.addTarget(VideoPlayerViewController.self,
+                                       action: #selector(handleTapOnVideo),
+                                       for: .touchUpInside)
+
+        return switchControlUtility
+    }()
+
     private lazy var externalVideoOutputView: PlayerInfoView = {
         let externalVideoOutputView = PlayerInfoView()
         externalVideoOutputView.isHidden = true
@@ -416,49 +252,8 @@ class VideoPlayerViewController: UIViewController {
     private lazy var tapOnVideoRecognizer: UITapGestureRecognizer = {
         let tapOnVideoRecognizer = UITapGestureRecognizer(target: self,
                                                           action: #selector(handleTapOnVideo))
+        tapOnVideoRecognizer.require(toFail: doubleTapGestureRecognizer)
         return tapOnVideoRecognizer
-    }()
-
-    private lazy var playPauseRecognizer: UITapGestureRecognizer = {
-        let playPauseRecognizer = UITapGestureRecognizer(target: self,
-                                                         action: #selector(handlePlayPauseGesture))
-        playPauseRecognizer.numberOfTouchesRequired = 2
-        return playPauseRecognizer
-    }()
-
-    private lazy var pinchRecognizer: UIPinchGestureRecognizer = {
-        let pinchRecognizer = UIPinchGestureRecognizer(target: self,
-                                                       action: #selector(handlePinchGesture(recognizer:)))
-        return pinchRecognizer
-    }()
-
-    private lazy var doubleTapRecognizer: UITapGestureRecognizer = {
-        let doubleTapRecognizer = UITapGestureRecognizer(target: self,
-                                                         action: #selector(handleDoubleTapGesture(recognizer:)))
-        doubleTapRecognizer.numberOfTapsRequired = 2
-        tapOnVideoRecognizer.require(toFail: doubleTapRecognizer)
-        return doubleTapRecognizer
-    }()
-
-    private lazy var panRecognizer: UIPanGestureRecognizer = {
-        let panRecognizer = UIPanGestureRecognizer(target: self,
-                                                   action: #selector(handlePanGesture(recognizer:)))
-        panRecognizer.maximumNumberOfTouches = 1
-        return panRecognizer
-    }()
-
-    private lazy var leftSwipeRecognizer: UISwipeGestureRecognizer = {
-        var leftSwipeRecognizer = UISwipeGestureRecognizer(target: self,
-                                                           action: #selector(handleSwipeGestures(recognizer:)))
-        leftSwipeRecognizer.direction = .left
-        return leftSwipeRecognizer
-    }()
-
-    private lazy var rightSwipeRecognizer: UISwipeGestureRecognizer = {
-        var rightSwipeRecognizer = UISwipeGestureRecognizer(target: self,
-                                                            action: #selector(handleSwipeGestures(recognizer:)))
-        rightSwipeRecognizer.direction = .right
-        return rightSwipeRecognizer
     }()
 
     private lazy var upSwipeRecognizer: UISwipeGestureRecognizer = {
@@ -477,22 +272,16 @@ class VideoPlayerViewController: UIViewController {
         return downSwipeRecognizer
     }()
 
-    private lazy var minimizeGestureRecognizer: UIPanGestureRecognizer = {
-        let dismissGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handleMinimizeGesture(_:)))
-        return dismissGestureRecognizer
+    private lazy var longPressGestureRecognizer: UILongPressGestureRecognizer = {
+        let longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPressGesture(_:)))
+        return longPressRecognizer
     }()
 
     private var isGestureActive: Bool = false
 
-    private var viewTranslation: CGPoint = CGPoint(x: 0, y: 0)
+    private var minimizationInitialCenter: CGPoint?
 
     // MARK: - Popup Views
-
-    private lazy var equalizerPopupView: PopupView = {
-        let equalizerPopupView = PopupView()
-        equalizerPopupView.delegate = self
-        return equalizerPopupView
-    }()
 
     lazy var trackSelectorPopupView: PopupView = {
         let trackSelectorPopupView = PopupView()
@@ -500,98 +289,60 @@ class VideoPlayerViewController: UIViewController {
         return trackSelectorPopupView
     }()
 
-    private var addBookmarksView: AddBookmarksView? = nil
-
     // MARK: - Constraints
-
-    private lazy var mainLayoutGuide: UILayoutGuide = {
-        let guide: UILayoutGuide
-        if #available(iOS 11.0, *) {
-            return view.safeAreaLayoutGuide
-        } else {
-            return view.layoutMarginsGuide
-        }
-    }()
 
     private lazy var videoPlayerControlsHeightConstraint: NSLayoutConstraint = {
         videoPlayerControls.heightAnchor.constraint(equalToConstant: 44)
     }()
 
     private lazy var videoPlayerControlsBottomConstraint: NSLayoutConstraint = {
-        videoPlayerControls.bottomAnchor.constraint(equalTo: layoutGuide.bottomAnchor,
-                                            constant: -5)
+        videoPlayerControls.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                                                    constant: -5)
     }()
 
     private lazy var equalizerPopupTopConstraint: NSLayoutConstraint = {
-        equalizerPopupView.topAnchor.constraint(equalTo: mainLayoutGuide.topAnchor, constant: 10)
+        equalizerPopupView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10)
     }()
 
     private lazy var equalizerPopupBottomConstraint: NSLayoutConstraint = {
-        equalizerPopupView.bottomAnchor.constraint(equalTo: scrubProgressBar.topAnchor, constant: -10)
+        equalizerPopupView.bottomAnchor.constraint(equalTo: mediaScrubProgressBar.topAnchor, constant: -10)
     }()
 
     private lazy var trackSelectorPopupTopConstraint: NSLayoutConstraint = {
-        trackSelectorPopupView.topAnchor.constraint(equalTo: mainLayoutGuide.topAnchor, constant: 10)
+        trackSelectorPopupView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10)
     }()
 
     private lazy var trackSelectorPopupBottomConstraint: NSLayoutConstraint = {
-        trackSelectorPopupView.bottomAnchor.constraint(equalTo: scrubProgressBar.topAnchor, constant: -10)
+        trackSelectorPopupView.bottomAnchor.constraint(equalTo: mediaScrubProgressBar.topAnchor, constant: -10)
     }()
 
-    // MARK: -
+    // MARK: - Init methods
 
-    @objc init(mediaLibraryService: MediaLibraryService, rendererDiscovererManager: VLCRendererDiscovererManager, playerController: PlayerController) {
-        self.mediaLibraryService = mediaLibraryService
-        self.rendererDiscovererManager = rendererDiscovererManager
-        self.playerController = playerController
-        super.init(nibName: nil, bundle: nil)
+#if os(iOS)
+    @objc override init(mediaLibraryService: MediaLibraryService, rendererDiscovererManager: VLCRendererDiscovererManager, playerController: PlayerController) {
+        super.init(mediaLibraryService: mediaLibraryService, rendererDiscovererManager: rendererDiscovererManager, playerController: playerController)
+
         self.playerController.delegate = self
-        systemBrightness = UIScreen.main.brightness
-        NotificationCenter.default.addObserver(self, selector: #selector(systemBrightnessChanged), name: UIApplication.didBecomeActiveNotification, object: nil)
+        self.mediaNavigationBar.addGestureRecognizer(minimizeGestureRecognizer)
+
+        brightnessControlView.delegate = self
+        volumeControlView.delegate = self
+    }
+#else
+    @objc override init(mediaLibraryService: MediaLibraryService, playerController: PlayerController) {
+        super.init(mediaLibraryService: mediaLibraryService, playerController: playerController)
+
+        self.mediaLibraryService = mediaLibraryService
+        self.playerController = playerController
+
+        self.playerController.delegate = self
+        systemBrightness = 1.0
         self.mediaNavigationBar.addGestureRecognizer(minimizeGestureRecognizer)
     }
+#endif
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    // MARK: -
-
-    @available(iOS 11.0, *)
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-
-        if UIDevice.current.userInterfaceIdiom != .phone {
-            return
-        }
-
-        // safeAreaInsets can take some time to get set.
-        // Once updated, check if we need to update the constraints for notches
-        adaptVideoOutputToNotch()
-    }
-
-    private func setupRendererDiscoverer() {
-        rendererButton = rendererDiscovererManager.setupRendererButton()
-        rendererButton?.tintColor = .white
-        if playbackService.renderer != nil {
-            rendererButton?.isSelected = true
-        }
-        if let rendererButton = rendererButton {
-            mediaNavigationBar.chromeCastButton = rendererButton
-        }
-        rendererDiscovererManager.addSelectionHandler {
-            rendererItem in
-            if rendererItem != nil {
-                self.changeVideoOutput(to: self.externalVideoOutputView.displayView)
-                let color: UIColor = PresentationTheme.current.colors.orangeUI
-                self.mediaNavigationBar.updateDeviceButton(with: UIImage(named: "rendererFull"), color: color)
-            } else if let currentRenderer = self.playbackService.renderer {
-                self.removedCurrentRendererItem(currentRenderer)
-            } else {
-                // There is no renderer item
-                self.mediaNavigationBar.updateDeviceButton(with: UIImage(named: "renderer"), color: .white)
-            }
-        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -600,7 +351,7 @@ class VideoPlayerViewController: UIViewController {
         playbackService.recoverPlaybackState()
         playerController.lockedOrientation = .portrait
         navigationController?.navigationBar.isHidden = true
-        scrubProgressBar.updateInterfacePosition()
+        mediaScrubProgressBar.updateInterfacePosition()
 
         setControlsHidden(false, animated: false)
 
@@ -611,9 +362,11 @@ class VideoPlayerViewController: UIViewController {
 
         artWorkImageView.image = nil
         // FIXME: Test userdefault
+#if os(iOS)
         let rendererDiscoverer = rendererDiscovererManager
         rendererDiscoverer.presentingViewController = self
         rendererDiscoverer.delegate = self
+#endif
 
         var color: UIColor = .white
         var image: UIImage? = UIImage(named: "renderer")
@@ -631,25 +384,33 @@ class VideoPlayerViewController: UIViewController {
             adaptVideoOutputToNotch()
         }
 
-        let setIconVisibility = playbackService.adjustFilter.isEnabled ? showIcon : hideIcon
-        setIconVisibility(optionsNavigationBar.videoFiltersButton)
+        if playbackService.adjustFilter.isEnabled {
+            showIcon(button: optionsNavigationBar.videoFiltersButton)
+        } else {
+            hideIcon(button: optionsNavigationBar.videoFiltersButton)
+        }
 
         view.transform = .identity
+
+        self.longPressPlaybackSpeedView.layer.opacity = 0
+
+        playbackService.restoreAudioAndSubtitleTrack()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // _viewAppeared = YES;
-        
+
+#if os(iOS)
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: kVLCPlayerShouldRememberBrightness) {
             if let brightness = defaults.value(forKey: KVLCPlayerBrightness) as? CGFloat {
-                UIScreen.main.brightness = brightness
+                animateBrightness(to: brightness)
+                self.brightnessControl.value = Float(brightness)
             }
         }
-        
+#endif
+
         playbackService.recoverDisplayedMetadata()
-        // [self resetVideoFiltersSliders];
 
         // The video output view is not initialized when the play as audio option was chosen
         playbackService.videoOutputView = playbackService.playAsAudio ? nil : videoOutputView
@@ -662,23 +423,20 @@ class VideoPlayerViewController: UIViewController {
         moreOptionsActionSheet.resetOptionsIfNecessary()
     }
 
-//    override func viewDidLayoutSubviews() {
-//        FIXME: - equalizer
-//        self.scrubViewTopConstraint.constant = CGRectGetMaxY(self.navigationController.navigationBar.frame);
-//    }
-
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
 
         // Adjust the position of the AB Repeat marks if needed based on the device's orientation.
-        scrubProgressBar.adjustABRepeatMarks(aMark: aMark, bMark: bMark)
+        mediaScrubProgressBar.adjustABRepeatMarks(aMark: aMark, bMark: bMark)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        topBottomBackgroundGradientLayer.frame = UIScreen.main.bounds
-        brightnessBackgroundGradientLayer.frame = UIScreen.main.bounds
-        volumeBackgroundGradientLayer.frame = UIScreen.main.bounds
+        topBottomBackgroundGradientLayer.frame = self.view.bounds
+#if os(iOS)
+        brightnessBackgroundGradientLayer.frame = self.view.bounds
+        volumeBackgroundGradientLayer.frame = self.view.bounds
+#endif
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -686,10 +444,7 @@ class VideoPlayerViewController: UIViewController {
         if playbackService.videoOutputView == videoOutputView && !playbackService.isPlayingOnExternalScreen() {
             playbackService.videoOutputView = nil
         }
-        // FIXME: -
-        // _viewAppeared = NO;
 
-        // FIXME: - interface
         if idleTimer != nil {
             idleTimer?.invalidate()
             idleTimer = nil
@@ -698,8 +453,10 @@ class VideoPlayerViewController: UIViewController {
         // Reset lock interface on end of playback.
         playerController.isInterfaceLocked = false
 
+#if os(iOS)
         volumeControlView.alpha = 0
         brightnessControlView.alpha = 0
+#endif
 
         numberOfGestureSeek = 0
         totalSeekDuration = 0
@@ -710,12 +467,22 @@ class VideoPlayerViewController: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         deviceMotion.stopDeviceMotion()
+#if os(iOS)
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: kVLCPlayerShouldRememberBrightness) {
             let currentBrightness = UIScreen.main.brightness
+            self.brightnessControl.value = Float(currentBrightness) // helper in indicating change in the system brightness
             defaults.set(currentBrightness, forKey: KVLCPlayerBrightness)
-            UIScreen.main.brightness = systemBrightness!
         }
+
+        //set the value of system brightness after closing the app x
+        //even if the Player Should Remember Brightness option is disabled
+        animateBrightness(to: systemBrightness!, duration: 0.35)
+
+        // remove the observer when the view disappears to avoid breaking the brightness view value
+        // when the video player is not shown to save the persisted values
+        removePlayerBrightnessObservers()
+#endif
     }
 
     override func viewDidLoad() {
@@ -723,18 +490,222 @@ class VideoPlayerViewController: UIViewController {
         navigationController?.navigationBar.isHidden = true
         setupObservers()
         setupViews()
+        setupAccessibility()
         setupGestures()
         setupConstraints()
+#if os(iOS)
         setupRendererDiscoverer()
+#endif
     }
 
-    @objc func systemBrightnessChanged() {
-        systemBrightness = UIScreen.main.brightness
+    // MARK: - Setup methods
+
+    private func setupObservers() {
+        try? AVAudioSession.sharedInstance().setActive(true)
+        AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: NSKeyValueObservingOptions.new, context: nil)
+
+        NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerControls), name: .VLCDidAppendMediaToQueue, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerControls), name: .VLCDidRemoveMediaFromQueue, object: nil)
+    }
+
+    private func setupViews() {
+        view.backgroundColor = .black
+        view.addSubview(mediaNavigationBar)
+        hideSystemVolumeInfo()
+        videoPlayerButtons()
+        if playerController.isRememberStateEnabled {
+            setupVideoControlsState()
+        }
+
+        view.addSubview(switchControlUtility)
+        view.addSubview(optionsNavigationBar)
+        view.addSubview(videoPlayerControls)
+        view.addSubview(mediaScrubProgressBar)
+        view.addSubview(videoOutputView)
+#if os(iOS)
+        view.addSubview(brightnessControlView)
+        view.addSubview(volumeControlView)
+#endif
+        view.addSubview(externalVideoOutputView)
+        view.addSubview(statusLabel)
+        view.addSubview(titleSelectionView)
+        view.addSubview(longPressPlaybackSpeedView)
+
+        view.bringSubviewToFront(statusLabel)
+        view.sendSubviewToBack(videoOutputView)
+        view.insertSubview(backgroundGradientView, aboveSubview: videoOutputView)
+#if os(iOS)
+        view.insertSubview(sideBackgroundGradientView, aboveSubview: backgroundGradientView)
+#endif
+        videoOutputView.addSubview(artWorkImageView)
+    }
+
+    private func setupAccessibility() {
+
+        if playerController.isControlsHidden {
+            view.applyAccessibilityControls(
+                switchControlUtility
+            )
+
+        } else {
+#if os(iOS)
+            view.applyAccessibilityControls(
+                videoPlayerControls,
+                mediaScrubProgressBar,
+                volumeControlView,
+                brightnessControlView,
+                mediaNavigationBar
+            )
+#else
+            view.applyAccessibilityControls(
+                videoPlayerControls,
+                mediaScrubProgressBar,
+                mediaNavigationBar
+            )
+#endif
+
+        }
+
+        // - custom actions
+
+        let playPause = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("PLAY_PAUSE_BUTTON", comment: ""),
+                    image: .with(systemName: "playpause"),
+                    target: self,
+                    selector: #selector(handleAccessibilityPlayPause))
+
+        let close = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("STOP_BUTTON", comment: ""),
+                    image: .with(systemName: "xmark"),
+                    target: self,
+                    selector: #selector(handleAccessibilityClose))
+
+        let forward = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("FWD_BUTTON", comment: ""),
+                    image: .with(systemName: "plus.arrow.trianglehead.clockwise"),
+                    target: self,
+                    selector: #selector(handleAccessibilityForward))
+
+        let backward = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("BWD_BUTTON", comment: ""),
+                    image: .with(systemName: "minus.arrow.trianglehead.counterclockwise"),
+                    target: self,
+                    selector: #selector(handleAccessibilityBackward))
+
+        let next = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("NEXT_HINT", comment: ""),
+                    image: .with(systemName: "forward.end"),
+                    target: self,
+                    selector: #selector(handleAccessibilityNext))
+
+        let prev = UIAccessibilityCustomAction
+            .create(name: NSLocalizedString("PREVIOUS_HINT", comment: ""),
+                    image: .with(systemName: "backward.end"),
+                    target: self,
+                    selector: #selector(handleAccessibilityPrev))
+
+
+        accessibilityCustomActions = [playPause, close, forward, backward, next, prev]
+    }
+
+    override func setupGestures() {
+        super.setupGestures()
+        view.addGestureRecognizer(tapOnVideoRecognizer)
+        view.addGestureRecognizer(pinchRecognizer)
+        view.addGestureRecognizer(doubleTapGestureRecognizer)
+        view.addGestureRecognizer(playPauseRecognizer)
+        view.addGestureRecognizer(panRecognizer)
+        view.addGestureRecognizer(leftSwipeRecognizer)
+        view.addGestureRecognizer(rightSwipeRecognizer)
+        view.addGestureRecognizer(upSwipeRecognizer)
+        view.addGestureRecognizer(downSwipeRecognizer)
+        view.addGestureRecognizer(longPressGestureRecognizer)
+
+        panRecognizer.require(toFail: leftSwipeRecognizer)
+        panRecognizer.require(toFail: rightSwipeRecognizer)
+    }
+
+    private func setupConstraints() {
+        setupVideoOutputConstraints()
+        setupSwitchControlUtilityConstraints()
+        setupExternalVideoOutputConstraints()
+        setupVideoPlayerControlsConstraints()
+        setupMediaNavigationBarConstraints()
+        setupScrubProgressBarConstraints()
+#if os(iOS)
+        setupBrightnessControlConstraints()
+        setupVolumeControlConstraints()
+#endif
+        setupStatusLabelConstraints()
+        setupTitleSelectionConstraints()
+        setupLongPressPlaybackSpeedConstraints()
+    }
+
+#if os(iOS)
+    private func setupRendererDiscoverer() {
+        rendererButton = rendererDiscovererManager.setupRendererButton()
+        rendererButton.tintColor = .white
+        if playbackService.renderer != nil {
+            rendererButton.isSelected = true
+        }
+
+        mediaNavigationBar.chromeCastButton = rendererButton
+
+        rendererDiscovererManager.addSelectionHandler {
+            rendererItem in
+            if rendererItem != nil {
+                self.changeVideoOutput(to: self.externalVideoOutputView.displayView)
+                let color: UIColor = PresentationTheme.current.colors.orangeUI
+                self.mediaNavigationBar.updateDeviceButton(with: UIImage(named: "rendererFull"), color: color)
+            } else if let currentRenderer = self.playbackService.renderer {
+                self.removedCurrentRendererItem(currentRenderer)
+            } else {
+                // There is no renderer item
+                self.mediaNavigationBar.updateDeviceButton(with: UIImage(named: "renderer"), color: .white)
+            }
+        }
+    }
+#endif
+
+    private func setupVideoControlsState() {
+        let isShuffleEnabled = playerController.isShuffleEnabled
+        let repeatMode = playerController.isRepeatEnabled
+        playbackService.isShuffleMode = isShuffleEnabled
+        playbackService.repeatMode = repeatMode
+        playModeUpdated()
     }
 
     @objc func setupQueueViewController(qvc: QueueViewController) {
         queueViewController = qvc
         queueViewController?.delegate = self
+    }
+
+    private func setupTitleSelectionConstraints() {
+        NSLayoutConstraint.activate([
+            titleSelectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            titleSelectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            titleSelectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            titleSelectionView.topAnchor.constraint(equalTo: view.topAnchor)
+        ])
+    }
+
+    private func setupCommonSliderConstraints(for slider: UIView) {
+        let heightConstraint = slider.heightAnchor.constraint(lessThanOrEqualToConstant: 170)
+        let topConstraint = slider.topAnchor.constraint(equalTo: mediaNavigationBar.bottomAnchor)
+        let bottomConstraint = slider.bottomAnchor.constraint(equalTo: mediaScrubProgressBar.topAnchor, constant: -10)
+        let yConstraint = slider.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        heightConstraint.priority = .required
+        topConstraint.priority = .defaultHigh
+        bottomConstraint.priority = .defaultHigh
+        yConstraint.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            heightConstraint,
+            topConstraint,
+            bottomConstraint,
+            slider.widthAnchor.constraint(equalToConstant: 50),
+            yConstraint,
+        ])
+
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -744,11 +715,556 @@ class VideoPlayerViewController: UIViewController {
         titleSelectionView.mainStackView.axis = isLandscape ? .horizontal : .vertical
         titleSelectionView.mainStackView.distribution = isLandscape ? .fillEqually : .fill
     }
-}
 
-// MARK: -
+#if os(iOS)
+    private func addPlayerBrightnessObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemBrightnessChanged),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
 
-private extension VideoPlayerViewController {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerWillResignActive),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    private func removePlayerBrightnessObservers() {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+#endif
+
+    // MARK: - Private helpers
+
+#if os(iOS)
+    private func setupBrightnessControlConstraints() {
+        setupCommonSliderConstraints(for: brightnessControlView)
+        NSLayoutConstraint.activate([
+            brightnessControlView.leadingAnchor.constraint(equalTo: mediaScrubProgressBar.leadingAnchor),
+            brightnessControlView.topAnchor.constraint(greaterThanOrEqualTo: optionsNavigationBar.bottomAnchor)
+        ])
+    }
+
+    private func setupVolumeControlConstraints() {
+        setupCommonSliderConstraints(for: volumeControlView)
+        NSLayoutConstraint.activate([
+            volumeControlView.trailingAnchor.constraint(equalTo: mediaScrubProgressBar.trailingAnchor),
+            volumeControlView.topAnchor.constraint(greaterThanOrEqualTo: optionsNavigationBar.bottomAnchor)
+        ])
+    }
+#endif
+
+    private func setupVideoOutputConstraints() {
+        videoOutputViewLeadingConstraint = videoOutputView.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+        videoOutputViewTrailingConstraint = videoOutputView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+
+        NSLayoutConstraint.activate([
+            videoOutputViewLeadingConstraint,
+            videoOutputViewTrailingConstraint,
+            videoOutputView.topAnchor.constraint(equalTo: view.topAnchor),
+            videoOutputView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    private func setupSwitchControlUtilityConstraints() {
+        NSLayoutConstraint.activate([
+            switchControlUtility.heightAnchor.constraint(equalToConstant: 44),
+            switchControlUtility.widthAnchor.constraint(equalToConstant: 44),
+            switchControlUtility.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            switchControlUtility.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+        ])
+    }
+
+    private func setupExternalVideoOutputConstraints() {
+        NSLayoutConstraint.activate([
+            externalVideoOutputView.heightAnchor.constraint(equalToConstant: 320),
+            externalVideoOutputView.widthAnchor.constraint(equalToConstant: 320),
+            externalVideoOutputView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            externalVideoOutputView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+        ])
+    }
+
+    private func setupMediaNavigationBarConstraints() {
+        let padding: CGFloat = 16
+        NSLayoutConstraint.activate([
+            mediaNavigationBar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            mediaNavigationBar.leadingAnchor.constraint(equalTo: videoPlayerControls.leadingAnchor, constant: -8),
+            mediaNavigationBar.trailingAnchor.constraint(equalTo: videoPlayerControls.trailingAnchor, constant: 8),
+            mediaNavigationBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
+                                                    constant: padding),
+            optionsNavigationBar.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -padding),
+            optionsNavigationBar.topAnchor.constraint(equalTo: mediaNavigationBar.bottomAnchor, constant: padding)
+        ])
+    }
+
+    private func setupVideoPlayerControlsConstraints() {
+        let padding: CGFloat = 8
+        let minPadding: CGFloat = 5
+
+        NSLayoutConstraint.activate([
+            videoPlayerControlsHeightConstraint,
+            videoPlayerControls.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor,
+                                                         constant: padding),
+            videoPlayerControls.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor,
+                                                          constant: -padding),
+            videoPlayerControls.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor,
+                                                       constant: -2 * minPadding),
+            videoPlayerControlsBottomConstraint
+        ])
+    }
+
+    private func setupScrubProgressBarConstraints() {
+        let margin: CGFloat = 12
+
+        NSLayoutConstraint.activate([
+            mediaScrubProgressBar.leadingAnchor.constraint(equalTo: videoPlayerControls.leadingAnchor),
+            mediaScrubProgressBar.trailingAnchor.constraint(equalTo: videoPlayerControls.trailingAnchor),
+            mediaScrubProgressBar.bottomAnchor.constraint(equalTo: videoPlayerControls.topAnchor, constant: -margin)
+        ])
+    }
+
+    private func setupStatusLabelConstraints() {
+        NSLayoutConstraint.activate([
+            statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+
+    private func setupLongPressPlaybackSpeedConstraints() {
+        NSLayoutConstraint.activate([
+            longPressPlaybackSpeedView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            longPressPlaybackSpeedView.centerYAnchor.constraint(equalTo: mediaNavigationBar.centerYAnchor)
+        ])
+    }
+
+    private func setupSeekDurations() {
+        let defaults = UserDefaults.standard
+
+        tapSwipeEqual = defaults.bool(forKey: kVLCSettingPlaybackTapSwipeEqual)
+        forwardBackwardEqual = defaults.bool(forKey: kVLCSettingPlaybackForwardBackwardEqual)
+        seekForwardBy = defaults.integer(forKey: kVLCSettingPlaybackForwardSkipLength)
+        seekBackwardBy = forwardBackwardEqual ? seekForwardBy : defaults.integer(forKey: kVLCSettingPlaybackBackwardSkipLength)
+        seekForwardBySwipe = tapSwipeEqual ? seekForwardBy : defaults.integer(forKey: kVLCSettingPlaybackForwardSkipLengthSwipe)
+
+        if tapSwipeEqual, forwardBackwardEqual {
+            // if tap = swipe, and backward = forward, then backward swipe = forward tap
+            seekBackwardBySwipe = seekForwardBy
+        } else if tapSwipeEqual, !forwardBackwardEqual {
+            // if tap = swipe, and backward != forward, then backward swipe = backward tap
+            seekBackwardBySwipe = seekBackwardBy
+        } else if !tapSwipeEqual, forwardBackwardEqual {
+            // if tap != swipe, and backward = forward, then backward swipe = forward swipe
+            seekBackwardBySwipe = seekForwardBySwipe
+        } else {
+            // otherwise backward swipe = backward swipe
+            seekBackwardBySwipe = defaults.integer(forKey: kVLCSettingPlaybackBackwardSkipLengthSwipe)
+        }
+    }
+
+    private func setupForMediaProjection() {
+        let mediaHasProjection = playbackService.currentMediaIs360Video
+
+        fov = mediaHasProjection ? MediaProjection.FOV.default : 0
+
+        // Disable swipe gestures for 360
+        leftSwipeRecognizer.isEnabled = !mediaHasProjection
+        rightSwipeRecognizer.isEnabled = !mediaHasProjection
+        upSwipeRecognizer.isEnabled = !mediaHasProjection
+        downSwipeRecognizer.isEnabled = !mediaHasProjection
+
+        if mediaHasProjection {
+            deviceMotion.startDeviceMotion()
+        }
+    }
+
+    @objc private func handleAccessibilityPlayPause() -> Bool {
+        togglePlayPause()
+        return true
+    }
+
+    @objc private func handleAccessibilityClose() -> Bool {
+        playbackService.stopPlayback()
+        return true
+    }
+
+    @objc private func handleAccessibilityForward() -> Bool {
+        jumpForwards()
+        return true
+    }
+
+    @objc private func handleAccessibilityBackward() -> Bool {
+        jumpBackwards()
+        return true
+    }
+
+    @objc private func handleAccessibilityNext() -> Bool {
+        playbackService.next()
+        return true
+    }
+
+    @objc private func handleAccessibilityPrev() -> Bool {
+        playbackService.previous()
+        return true
+    }
+
+    // MARK: - Gesture handlers
+
+    @objc override func handlePinchGesture(recognizer: UIPinchGestureRecognizer) {
+        if playbackService.currentMediaIs360Video {
+            let zoom: CGFloat = MediaProjection.FOV.default * -(ZOOM_SENSITIVITY * recognizer.velocity / screenPixelSize.width)
+            if playbackService.updateViewpoint(0, pitch: 0,
+                                               roll: 0, fov: zoom, absolute: false) {
+                // Clam FOV between min and max
+                fov = max(min(fov + zoom, MediaProjection.FOV.max), MediaProjection.FOV.min)
+            }
+        } else if recognizer.velocity < 0
+                    && playerController.isCloseGestureEnabled {
+            delegate?.videoPlayerViewControllerDidMinimize(self)
+        }
+    }
+
+    override func handleDoubleTapGesture(_ sender: UITapGestureRecognizer) {
+        let screenWidth: CGFloat = view.frame.size.width
+        let backwardBoundary: CGFloat = screenWidth / 3.0
+        let forwardBoundary: CGFloat = 2 * screenWidth / 3.0
+
+        let tapPosition = sender.location(in: view)
+
+        // Reset number(set to -1/1) of seek when orientation has been changed.
+        if tapPosition.x < backwardBoundary {
+            numberOfGestureSeek = previousSeekState == .forward ? -1 : numberOfGestureSeek - 1
+        } else if tapPosition.x > forwardBoundary {
+            numberOfGestureSeek = previousSeekState == .backward ? 1 : numberOfGestureSeek + 1
+        } else {
+            playbackService.switchAspectRatio(true)
+            return
+        }
+
+        super.handleDoubleTapGesture(sender)
+    }
+
+    override func handlePanGesture(recognizer: UIPanGestureRecognizer) {
+        let currentPos = recognizer.location(in: view)
+
+        // Limit the gesture to avoid conflicts with top and bottom player controls
+        if currentPos.y > mediaScrubProgressBar.frame.origin.y
+            || currentPos.y < mediaNavigationBar.frame.origin.y {
+            recognizer.state = .ended
+        }
+
+        super.handlePanGesture(recognizer: recognizer)
+    }
+
+    override func handleSwipeGestures(recognizer: UISwipeGestureRecognizer) {
+        // Limit y position in order to avoid conflicts with the scrub position controls
+        guard recognizer.location(in: view).y < mediaScrubProgressBar.frame.origin.y else {
+            return
+        }
+
+        super.handleSwipeGestures(recognizer: recognizer)
+    }
+
+    @objc func handleTapOnVideo() {
+        if UserDefaults.standard.bool(forKey: kVLCSettingPauseWhenShowingControls) && playbackService.isPlaying {
+            playbackService.pause()
+        }
+
+        numberOfGestureSeek = 0
+        totalSeekDuration = 0
+        setControlsHidden(!playerController.isControlsHidden, animated: true)
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        if playbackService.isPlaying && playerController.isControlsHidden {
+            setControlsHidden(false, animated: true)
+        }
+
+        videoPlayerButtons()
+
+        let popupMargin: CGFloat
+        let videoPlayerControlsHeight: CGFloat
+        let scrubProgressBarSpacing: CGFloat
+
+        if traitCollection.verticalSizeClass == .compact {
+            popupMargin = 0
+            videoPlayerControlsHeight = 22
+            scrubProgressBarSpacing = 0
+        } else {
+            popupMargin = 10
+            videoPlayerControlsHeight = 44
+            scrubProgressBarSpacing = 5
+        }
+        equalizerPopupTopConstraint.constant = popupMargin
+        trackSelectorPopupTopConstraint.constant = popupMargin
+        equalizerPopupBottomConstraint.constant = -popupMargin
+        trackSelectorPopupBottomConstraint.constant = -popupMargin
+        if equalizerPopupView.isShown || trackSelectorPopupView.isShown {
+            videoPlayerControlsHeightConstraint.constant = videoPlayerControlsHeight
+            mediaScrubProgressBar.spacing = scrubProgressBarSpacing
+            view.layoutSubviews()
+        }
+    }
+
+    func jumpBackwards(_ interval: Int = 10) {
+        playbackService.jumpBackward(Int32(interval))
+    }
+
+    func jumpForwards(_ interval: Int = 10) {
+        playbackService.jumpForward(Int32(interval))
+    }
+
+    @objc func handleDoubleTapGesture(recognizer: UITapGestureRecognizer) {
+        let screenWidth: CGFloat = view.frame.size.width
+        let backwardBoundary: CGFloat = screenWidth / 3.0
+        let forwardBoundary: CGFloat = 2 * screenWidth / 3.0
+
+        let tapPosition = recognizer.location(in: view)
+
+        // Limit y position in order to avoid conflicts with the bottom controls
+        if tapPosition.y > mediaScrubProgressBar.frame.origin.y {
+            return
+        }
+
+        // Reset number(set to -1/1) of seek when orientation has been changed.
+        if tapPosition.x < backwardBoundary {
+            numberOfGestureSeek = previousSeekState == .forward ? -1 : numberOfGestureSeek - 1
+        } else if tapPosition.x > forwardBoundary {
+            numberOfGestureSeek = previousSeekState == .backward ? 1 : numberOfGestureSeek + 1
+        } else {
+            playbackService.switchAspectRatio(true)
+            return
+        }
+        //_isTapSeeking = YES;
+        executeSeekFromGesture(.tap)
+    }
+
+    private func applyYaw(yaw: CGFloat, pitch: CGFloat) {
+        //Add and limit new pitch and yaw
+        deviceMotion.yaw += yaw
+        deviceMotion.pitch += pitch
+
+        playbackService.updateViewpoint(deviceMotion.yaw,
+                                        pitch: deviceMotion.pitch,
+                                        roll: 0,
+                                        fov: fov, absolute: true)
+    }
+
+    private func updateProjection(with recognizer: UIPanGestureRecognizer) {
+        let newLocationInView: CGPoint = recognizer.location(in: view)
+
+        let diffX = newLocationInView.x - projectionLocation.x
+        let diffY = newLocationInView.y - projectionLocation.y
+        projectionLocation = newLocationInView
+
+        // ScreenSizePixel width is used twice to get a constant speed on the movement.
+        let diffYaw = fov * -diffX / screenPixelSize.width
+        let diffPitch = fov * -diffY / screenPixelSize.width
+
+        applyYaw(yaw: diffYaw, pitch: diffPitch)
+    }
+
+    @objc private func handleLongPressGesture(_ gestureRecognizer: UILongPressGestureRecognizer) {
+        guard playerController.isSpeedUpGestureEnabled,
+              playbackService.isPlaying else {
+            return
+        }
+
+        switch gestureRecognizer.state {
+        case .began:
+            // Store previous playback speed
+            previousPlaybackSpeed = playbackService.playbackRate
+            // Hide controls
+            setControlsHidden(true, animated: true)
+
+            // Set playback speed
+            if playbackService.playbackRate < 2 {
+                playbackService.playbackRate = 2
+            } else {
+                let playbackSpeed = playbackService.playbackRate + 1
+                playbackService.playbackRate = min(playbackSpeed, 8)
+            }
+
+            // Update view multiplier label
+            longPressPlaybackSpeedView.speedMultiplier = playbackService.playbackRate
+
+#if os(iOS)
+            // Generate selection feedback
+            UISelectionFeedbackGenerator().selectionChanged()
+#endif
+
+            // Show playback speed view
+            UIView.transition(with: longPressPlaybackSpeedView, duration: 0.4, options: .transitionCrossDissolve) {
+                self.longPressPlaybackSpeedView.layer.opacity = 1
+            }
+            break
+        case .ended, .cancelled:
+            // Set playback speed previous state
+            playbackService.playbackRate = previousPlaybackSpeed ?? 1
+
+            // Hide playback speed view
+            UIView.transition(with: longPressPlaybackSpeedView, duration: 0.4, options: .transitionCrossDissolve) {
+                self.longPressPlaybackSpeedView.layer.opacity = 0
+            }
+            break
+        default:
+            break
+        }
+    }
+
+    // MARK: - Observers
+
+#if os(iOS)
+    @objc func systemVolumeDidChange(notification: NSNotification) {
+        let volumelevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"]
+        UIView.transition(with: volumeControlView, duration: 0.4,
+                          options: .transitionCrossDissolve,
+                          animations : {
+            self.volumeControlView.updateIcon(level: volumelevel as! Float)
+
+        })
+    }
+#endif
+
+    // MARK: - Public helpers
+
+    @available(iOS 11.0, *)
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            return
+        }
+
+        // safeAreaInsets can take some time to get set.
+        // Once updated, check if we need to update the constraints for notches
+        adaptVideoOutputToNotch()
+    }
+
+    override func setControlsHidden(_ hidden: Bool, animated: Bool) {
+        guard !UIAccessibility.isVoiceOverRunning || !hidden else { return }
+
+        if (equalizerPopupView.isShown || trackSelectorPopupView.isShown) && hidden {
+            return
+        }
+        playerController.isControlsHidden = hidden
+        if let alert = alertController, hidden {
+            alert.dismiss(animated: true, completion: nil)
+            alertController = nil
+        }
+        let uiComponentOpacity: CGFloat = hidden ? 0 : 1
+
+        var qvcHidden = true
+        if let qvc = queueViewController {
+            qvcHidden = qvc.view.alpha == 0.0
+        }
+
+        let animations = { [weak self, playerController] in
+            self?.mediaNavigationBar.alpha = uiComponentOpacity
+            self?.optionsNavigationBar.alpha = uiComponentOpacity
+#if os(iOS)
+            self?.volumeControlView.alpha = playerController.isVolumeGestureEnabled ? uiComponentOpacity : 0
+            self?.brightnessControlView.alpha = playerController.isBrightnessGestureEnabled ? uiComponentOpacity : 0
+#endif
+            if !hidden || qvcHidden {
+                self?.videoPlayerControls.alpha = uiComponentOpacity
+                self?.mediaScrubProgressBar.alpha = uiComponentOpacity
+            }
+            self?.backgroundGradientView.alpha = hidden && qvcHidden ? 0 : 1
+#if os(iOS)
+            if hidden {
+                self?.sideBackgroundGradientView.alpha = 0
+            }
+#endif
+        }
+
+        let duration = animated ? 0.2 : 0
+        UIView.animate(withDuration: duration, delay: 0,
+                       options: .beginFromCurrentState, animations: animations,
+                       completion: { _ in
+            self.switchControlUtility.alpha = hidden ? 1 : 0
+            self.setupAccessibility()
+        })
+#if os(iOS)
+        self.setNeedsStatusBarAppearanceUpdate()
+#endif
+    }
+
+    @objc override func updatePlayerControls() {
+        videoPlayerControls.shouldEnableSeekButtons(playbackService.mediaList.count == 1)
+    }
+
+    override func minimizePlayer() {
+        delegate?.videoPlayerViewControllerDidMinimize(self)
+    }
+
+    override func shouldDisableGestures(_ disable: Bool) {
+        super.shouldDisableGestures(disable)
+
+        tapOnVideoRecognizer.isEnabled = !disable
+        upSwipeRecognizer.isEnabled = !disable
+        downSwipeRecognizer.isEnabled = !disable
+    }
+
+    override func showPopup(_ popupView: PopupView, with contentView: UIView, accessoryViewsDelegate: PopupViewAccessoryViewsDelegate? = nil) {
+        super.showPopup(popupView, with: contentView, accessoryViewsDelegate: accessoryViewsDelegate)
+
+        videoPlayerControls.moreActionsButton.isEnabled = false
+
+        let iPhone5width: CGFloat = 320
+        let leadingConstraint = popupView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10)
+        let trailingConstraint = popupView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10)
+        leadingConstraint.priority = .required
+        trailingConstraint.priority = .required
+
+        let popupViewTopConstraint: NSLayoutConstraint
+        let popupViewBottomConstraint: NSLayoutConstraint
+        if popupView == equalizerPopupView {
+            popupViewTopConstraint = equalizerPopupTopConstraint
+            popupViewBottomConstraint = equalizerPopupBottomConstraint
+        } else {
+            popupViewTopConstraint = trackSelectorPopupTopConstraint
+            popupViewBottomConstraint = trackSelectorPopupBottomConstraint
+        }
+
+        NSLayoutConstraint.activate([
+            popupViewTopConstraint,
+            popupViewBottomConstraint,
+            leadingConstraint,
+            trailingConstraint,
+            popupView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            popupView.widthAnchor.constraint(greaterThanOrEqualToConstant: iPhone5width)
+        ])
+    }
+
+    // MARK: - Private helpers
+
     @available(iOS 11.0, *)
     private func adaptVideoOutputToNotch() {
         // Ignore the constraint updates for iPads and notchless devices.
@@ -765,6 +1281,7 @@ private extension VideoPlayerViewController {
 
         // 30.0 represents the exact size of the notch
         let constant: CGFloat = playbackService.currentAspectRatio != AspectRatio.fillToScreen.rawValue ? 30.0 : 0.0
+#if os(iOS)
         let interfaceOrientation = UIApplication.shared.statusBarOrientation
 
         if interfaceOrientation == .landscapeLeft
@@ -775,10 +1292,14 @@ private extension VideoPlayerViewController {
             videoOutputViewLeadingConstraint.constant = 0
             videoOutputViewTrailingConstraint.constant = 0
         }
+#else
+        videoOutputViewLeadingConstraint.constant = 0
+        videoOutputViewTrailingConstraint.constant = 0
+#endif
         videoOutputView.layoutIfNeeded()
     }
 
-    func changeVideoOutput(to output: UIView?) {
+    private func changeVideoOutput(to output: UIView?) {
         // If we don't have a renderer we're mirroring and don't want to show the dialog
         let displayExternally = output == nil ? true : output != videoOutputView
 
@@ -828,8 +1349,13 @@ private extension VideoPlayerViewController {
     }
 
     private func resetIdleTimer() {
+        let intervalSetting = UserDefaults.standard
+            .integer(forKey: kVLCSettingPlayerControlDuration)
+
+        let interval = TimeInterval(max(intervalSetting, 4))
+
         guard let safeIdleTimer = idleTimer else {
-            idleTimer = Timer.scheduledTimer(timeInterval: 4,
+            idleTimer = Timer.scheduledTimer(timeInterval: interval,
                                              target: self,
                                              selector: #selector(handleIdleTimerExceeded),
                                              userInfo: nil,
@@ -837,14 +1363,12 @@ private extension VideoPlayerViewController {
             return
         }
 
-        if fabs(safeIdleTimer.fireDate.timeIntervalSinceNow) < 4 {
-            safeIdleTimer.fireDate = Date(timeIntervalSinceNow: 4)
+        if fabs(safeIdleTimer.fireDate.timeIntervalSinceNow) < interval {
+            safeIdleTimer.fireDate = Date(timeIntervalSinceNow: interval)
         }
     }
 
     private func executeSeekFromGesture(_ type: PlayerSeekGestureType) {
-        // FIXME: Need to add interface (ripple effect) for seek indicator
-        var hudString = ""
 
         let currentSeek: Int
         if numberOfGestureSeek > 0 {
@@ -857,511 +1381,37 @@ private extension VideoPlayerViewController {
             previousSeekState = .backward
         }
 
-        if totalSeekDuration > 0 {
-            hudString = "⇒ "
-            playbackService.jumpForward(Int32(currentSeek))
-        } else {
-            hudString = "⇐ "
-            playbackService.jumpBackward(Int32(currentSeek))
-        }
-
-        // Convert the time in seconds into milliseconds in order to the get the right VLCTime value.
-        let duration: VLCTime = VLCTime(number: NSNumber(value: abs(totalSeekDuration) * 1000))
-        hudString.append(duration.stringValue)
-        statusLabel.showStatusMessage(hudString)
+        displayAndApplySeekDuration(currentSeek)
     }
 
-    private func setupSeekDurations() {
-        let defaults = UserDefaults.standard
-
-        tapSwipeEqual = defaults.bool(forKey: kVLCSettingPlaybackTapSwipeEqual)
-        forwardBackwardEqual = defaults.bool(forKey: kVLCSettingPlaybackForwardBackwardEqual)
-        seekForwardBy = defaults.integer(forKey: kVLCSettingPlaybackForwardSkipLength)
-        seekBackwardBy = forwardBackwardEqual ? seekForwardBy : defaults.integer(forKey: kVLCSettingPlaybackBackwardSkipLength)
-        seekForwardBySwipe = tapSwipeEqual ? seekForwardBy : defaults.integer(forKey: kVLCSettingPlaybackForwardSkipLengthSwipe)
-
-        if tapSwipeEqual, forwardBackwardEqual {
-            // if tap = swipe, and backward = forward, then backward swipe = forward tap
-            seekBackwardBySwipe = seekForwardBy
-        } else if tapSwipeEqual, !forwardBackwardEqual {
-            // if tap = swipe, and backward != forward, then backward swipe = backward tap
-            seekBackwardBySwipe = seekBackwardBy
-        } else if !tapSwipeEqual, forwardBackwardEqual {
-            // if tap != swipe, and backward = forward, then backward swipe = forward swipe
-            seekBackwardBySwipe = seekForwardBySwipe
-        } else {
-            // otherwise backward swipe = backward swipe
-            seekBackwardBySwipe = defaults.integer(forKey: kVLCSettingPlaybackBackwardSkipLengthSwipe)
-        }
-    }
-}
-
-// MARK: - Gesture handlers
-
-extension VideoPlayerViewController {
-
-    @objc func handleTapOnVideo() {
-        numberOfGestureSeek = 0
-        totalSeekDuration = 0
-        setControlsHidden(!playerController.isControlsHidden, animated: true)
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        if playbackService.isPlaying && playerController.isControlsHidden {
-            setControlsHidden(false, animated: true)
-        }
-
-        videoPlayerButtons()
-
-        let popupMargin: CGFloat
-        let videoPlayerControlsHeight: CGFloat
-        let scrubProgressBarSpacing: CGFloat
-
-        if traitCollection.verticalSizeClass == .compact {
-            popupMargin = 0
-            videoPlayerControlsHeight = 22
-            scrubProgressBarSpacing = 0
-        } else {
-            popupMargin = 10
-            videoPlayerControlsHeight = 44
-            scrubProgressBarSpacing = 5
-        }
-        equalizerPopupTopConstraint.constant = popupMargin
-        trackSelectorPopupTopConstraint.constant = popupMargin
-        equalizerPopupBottomConstraint.constant = -popupMargin
-        trackSelectorPopupBottomConstraint.constant = -popupMargin
-        if equalizerPopupView.isShown || trackSelectorPopupView.isShown {
-            videoPlayerControlsHeightConstraint.constant = videoPlayerControlsHeight
-            scrubProgressBar.spacing = scrubProgressBarSpacing
-            view.layoutSubviews()
-        }
-    }
-
-    private func setControlsHidden(_ hidden: Bool, animated: Bool) {
-        guard !UIAccessibility.isVoiceOverRunning || !hidden else { return }
-
-        if (equalizerPopupView.isShown || trackSelectorPopupView.isShown) && hidden {
-            return
-        }
-        playerController.isControlsHidden = hidden
-        if let alert = alertController, hidden {
-            alert.dismiss(animated: true, completion: nil)
-            alertController = nil
-        }
-        let uiComponentOpacity: CGFloat = hidden ? 0 : 1
-
-        var qvcHidden = true
-        if let qvc = queueViewController {
-            qvcHidden = qvc.view.alpha == 0.0
-        }
-
-        let animations = { [weak self, playerController] in
-            self?.mediaNavigationBar.alpha = uiComponentOpacity
-            self?.optionsNavigationBar.alpha = uiComponentOpacity
-            self?.volumeControlView.alpha = playerController.isVolumeGestureEnabled ? uiComponentOpacity : 0
-            self?.brightnessControlView.alpha = playerController.isBrightnessGestureEnabled ? uiComponentOpacity : 0
-            if !hidden || qvcHidden {
-                self?.videoPlayerControls.alpha = uiComponentOpacity
-                self?.scrubProgressBar.alpha = uiComponentOpacity
-            }
-            self?.backgroundGradientView.alpha = hidden && qvcHidden ? 0 : 1
-            if hidden {
-                self?.sideBackgroundGradientView.alpha = 0
-            }
-        }
-
-        let duration = animated ? 0.2 : 0
-        UIView.animate(withDuration: duration, delay: 0,
-                       options: .beginFromCurrentState, animations: animations,
-                       completion: nil)
-        self.setNeedsStatusBarAppearanceUpdate()
-    }
-
-    @objc func handlePlayPauseGesture() {
-        guard playerController.isPlayPauseGestureEnabled else {
+    private func applyCustomEqualizerProfileIfNeeded() {
+        let userDefaults = UserDefaults.standard
+        guard userDefaults.bool(forKey: kVLCCustomProfileEnabled) else {
             return
         }
 
-        if playbackService.isPlaying {
-            playbackService.pause()
-            setControlsHidden(false, animated: playerController.isControlsHidden)
-        } else {
-            playbackService.play()
-        }
-    }
+        let profileIndex = userDefaults.integer(forKey: kVLCSettingEqualizerProfile)
+        let encodedData = userDefaults.data(forKey: kVLCCustomEqualizerProfiles)
 
-    func jumpBackwards(_ interval: Int = 10) {
-        playbackService.jumpBackward(Int32(interval))
-    }
-
-    func jumpForwards(_ interval: Int = 10) {
-        playbackService.jumpForward(Int32(interval))
-    }
-
-    @objc func handlePinchGesture(recognizer: UIPinchGestureRecognizer) {
-        if playbackService.currentMediaIs360Video {
-            let zoom: CGFloat = MediaProjection.FOV.default * -(ZOOM_SENSITIVITY * recognizer.velocity / screenPixelSize.width)
-            if playbackService.updateViewpoint(0, pitch: 0,
-                                               roll: 0, fov: zoom, absolute: false) {
-                // Clam FOV between min and max
-                fov = max(min(fov + zoom, MediaProjection.FOV.max), MediaProjection.FOV.min)
-            }
-        } else if recognizer.velocity < 0
-                    && playerController.isCloseGestureEnabled {
-            delegate?.videoPlayerViewControllerDidMinimize(self)
-        }
-    }
-
-    @objc func handleDoubleTapGesture(recognizer: UITapGestureRecognizer) {
-        let screenWidth: CGFloat = view.frame.size.width
-        let backwardBoundary: CGFloat = screenWidth / 3.0
-        let forwardBoundary: CGFloat = 2 * screenWidth / 3.0
-
-        let tapPosition = recognizer.location(in: view)
-
-        // Limit y position in order to avoid conflicts with the bottom controls
-        if tapPosition.y > scrubProgressBar.frame.origin.y {
+        guard let encodedData = encodedData,
+              let customProfiles = NSKeyedUnarchiver(forReadingWith: encodedData).decodeObject(forKey: "root") as? CustomEqualizerProfiles,
+              profileIndex < customProfiles.profiles.count else {
             return
         }
 
-        // Reset number(set to -1/1) of seek when orientation has been changed.
-        if tapPosition.x < backwardBoundary {
-            numberOfGestureSeek = previousSeekState == .forward ? -1 : numberOfGestureSeek - 1
-        } else if tapPosition.x > forwardBoundary {
-            numberOfGestureSeek = previousSeekState == .backward ? 1 : numberOfGestureSeek + 1
-        } else {
-            playbackService.switchAspectRatio(true)
-            return
+        let selectedProfile = customProfiles.profiles[profileIndex]
+        playbackService.preAmplification = CGFloat(selectedProfile.preAmpLevel)
+
+        for (index, frequency) in selectedProfile.frequencies.enumerated() {
+            playbackService.setAmplification(CGFloat(frequency), forBand: UInt32(index))
         }
-        //_isTapSeeking = YES;
-        executeSeekFromGesture(.tap)
-    }
-
-    private func detectPanType(_ recognizer: UIPanGestureRecognizer) -> VideoPlayerPanType {
-        let window: UIWindow = UIApplication.shared.keyWindow!
-        let windowWidth: CGFloat = window.bounds.width
-        let location: CGPoint = recognizer.location(in: window)
-
-        var panType: VideoPlayerPanType = .none
-        if location.x < 3 * windowWidth / 3 && playerController.isVolumeGestureEnabled {
-            panType = .volume
-        }
-        if location.x < 2 * windowWidth / 3 {
-            panType = .none
-        }
-        if location.x < 1 * windowWidth / 3 && playerController.isBrightnessGestureEnabled {
-             panType = .brightness
-        }
-
-        if playbackService.currentMediaIs360Video {
-            panType = .projection
-        }
-        return panType
-    }
-
-    private func applyYaw(yaw: CGFloat, pitch: CGFloat) {
-        //Add and limit new pitch and yaw
-        deviceMotion.yaw += yaw
-        deviceMotion.pitch += pitch
-
-        playbackService.updateViewpoint(deviceMotion.yaw,
-                                        pitch: deviceMotion.pitch,
-                                        roll: 0,
-                                        fov: fov, absolute: true)
-    }
-
-    private func updateProjection(with recognizer: UIPanGestureRecognizer) {
-        let newLocationInView: CGPoint = recognizer.location(in: view)
-
-        let diffX = newLocationInView.x - projectionLocation.x
-        let diffY = newLocationInView.y - projectionLocation.y
-        projectionLocation = newLocationInView
-
-        // ScreenSizePixel width is used twice to get a constant speed on the movement.
-        let diffYaw = fov * -diffX / screenPixelSize.width
-        let diffPitch = fov * -diffY / screenPixelSize.width
-
-        applyYaw(yaw: diffYaw, pitch: diffPitch)
-    }
-
-    @objc private func handlePanGesture(recognizer: UIPanGestureRecognizer) {
-        let verticalPanVelocity: Float = Float(recognizer.velocity(in: view).y)
-
-        let currentPos = recognizer.location(in: view)
-
-        // Limit the gesture to avoid conflicts with top and bottom player controls
-        if currentPos.y > scrubProgressBar.frame.origin.y
-            || currentPos.y < mediaNavigationBar.frame.origin.y {
-            recognizer.state = .ended
-        }
-
-        let panType = detectPanType(recognizer)
-        if panType == .none {
-            return handleMinimizeGesture(recognizer)
-        }
-
-        guard panType == .projection
-                || (panType == .volume && playerController.isVolumeGestureEnabled)
-                || (panType == .brightness && playerController.isBrightnessGestureEnabled)
-        else {
-            return
-        }
-
-        if recognizer.state == .began {
-            isGestureActive = true
-            var animations : (() -> Void)?
-            currentPanType = panType
-            switch currentPanType {
-            case .brightness:
-                brightnessBackgroundGradientLayer.isHidden = false
-                brightnessControl.fetchDeviceValue()
-                animations = { [brightnessControlView, sideBackgroundGradientView] in
-                    brightnessControlView.alpha = 1
-                    sideBackgroundGradientView.alpha = 1
-                }
-            case .volume:
-                volumeBackgroundGradientLayer.isHidden = false
-                volumeControl.fetchDeviceValue()
-                animations = { [volumeControlView, sideBackgroundGradientView] in
-                    volumeControlView.alpha = 1
-                    sideBackgroundGradientView.alpha = 1
-                }
-            default:
-                break
-            }
-            if let animations = animations {
-                UIView.animate(withDuration: 0.2, delay: 0,
-                               options: .beginFromCurrentState, animations: animations,
-                               completion: nil)
-            }
-            if playbackService.currentMediaIs360Video {
-                projectionLocation = currentPos
-                deviceMotion.stopDeviceMotion()
-            }
-        }
-
-        switch currentPanType {
-        case .volume:
-            if recognizer.state == .changed || recognizer.state == .ended {
-                let newValue = volumeControl.value - (verticalPanVelocity * volumeControl.speed)
-                volumeControl.value = min(max(newValue, 0), 1)
-                volumeControl.applyValueToDevice()
-                volumeControlView.updateIcon(level: volumeControl.value)
-            }
-            break
-        case .brightness:
-            if recognizer.state == .changed || recognizer.state == .ended {
-                let newValue = brightnessControl.value - (verticalPanVelocity * brightnessControl.speed)
-                brightnessControl.value = min(max(newValue, 0), 1)
-                brightnessControl.applyValueToDevice()
-                brightnessControlView.updateIcon(level: brightnessControl.value)
-            }
-        case .projection:
-            updateProjection(with: recognizer)
-        case .none:
-            break
-        }
-
-        if recognizer.state == .ended {
-            var animations : (() -> Void)?
-
-            // Check if both of the sliders are visible to hide them at the same time
-            if currentPanType == .brightness && volumeControlView.alpha == 1 ||
-                currentPanType == .volume && brightnessControlView.alpha == 1 {
-                animations = { [brightnessControlView,
-                                volumeControlView,
-                                sideBackgroundGradientView] in
-                    brightnessControlView.alpha = 0
-                    volumeControlView.alpha = 0
-                    sideBackgroundGradientView.alpha = 0
-                }
-            } else if currentPanType == .brightness {
-                animations = { [brightnessControlView,
-                                sideBackgroundGradientView] in
-                    brightnessControlView.alpha = 0
-                    sideBackgroundGradientView.alpha = 0
-                }
-            } else if currentPanType == .volume {
-                animations = { [volumeControlView,
-                                sideBackgroundGradientView] in
-                    volumeControlView.alpha = 0
-                    sideBackgroundGradientView.alpha = 0
-                }
-            }
-
-            if let animations = animations {
-                UIView.animate(withDuration: 0.2, delay: 0.5,
-                               options: .beginFromCurrentState, animations: animations, completion: {
-                    [brightnessBackgroundGradientLayer,
-                     volumeBackgroundGradientLayer] _ in
-                    brightnessBackgroundGradientLayer.isHidden = true
-                    volumeBackgroundGradientLayer.isHidden = true
-                    self.isGestureActive = false
-                    self.setControlsHidden(true, animated: true)
-                })
-            }
-
-            currentPanType = .none
-            if playbackService.currentMediaIs360Video {
-                deviceMotion.startDeviceMotion()
-            }
-        }
-    }
-
-    @objc private func handleSwipeGestures(recognizer: UISwipeGestureRecognizer) {
-        guard playerController.isSwipeSeekGestureEnabled else {
-            return
-        }
-
-        // Make sure that we are currently not scrubbing in order to avoid conflicts.
-        guard scrubProgressBar.isScrubbing == false else {
-            return
-        }
-
-        // Limit y position in order to avoid conflicts with the scrub position controls
-        guard recognizer.location(in: view).y < scrubProgressBar.frame.origin.y else {
-            return
-        }
-
-        var hudString = ""
-
-        switch recognizer.direction {
-        case .right:
-            numberOfGestureSeek = previousSeekState == .backward ? 1 : numberOfGestureSeek + 1
-            executeSeekFromGesture(.swipe)
-            return
-        case .left:
-            numberOfGestureSeek = previousSeekState == .forward ? -1 : numberOfGestureSeek - 1
-            executeSeekFromGesture(.swipe)
-            return
-        case .up:
-            playbackService.previous()
-            hudString = NSLocalizedString("BWD_BUTTON", comment: "")
-        case .down:
-            playbackService.next()
-            hudString = NSLocalizedString("FWD_BUTTON", comment: "")
-        default:
-            break
-        }
-
-        if recognizer.state == .ended {
-            statusLabel.showStatusMessage(hudString)
-        }
-    }
-
-    @objc private func handleMinimizeGesture(_ sender: UIPanGestureRecognizer) {
-        switch sender.state {
-        case .changed:
-            viewTranslation = sender.translation(in: view)
-            if viewTranslation.y < 0 {
-                return
-            }
-
-            UIView.animate(withDuration: 0.5,
-                           delay: 0,
-                           usingSpringWithDamping: 0.7,
-                           initialSpringVelocity: 1,
-                           options: .curveEaseOut,
-                           animations: {
-                self.view.transform = CGAffineTransform(translationX: 0, y: self.viewTranslation.y)
-            })
-
-            break
-        case .ended:
-            let height = view.frame.height * 0.1
-            if viewTranslation.y < height {
-                UIView.animate(withDuration: 0.5,
-                               delay: 0,
-                               usingSpringWithDamping: 0.7,
-                               initialSpringVelocity: 1,
-                               options: .curveEaseOut,
-                               animations: {
-                    self.view.transform = .identity
-                })
-            } else {
-                delegate?.videoPlayerViewControllerDidMinimize(self)
-            }
-
-            break
-        default:
-            break
-        }
-    }
-}
-
-// MARK: - Private setups
-
-private extension VideoPlayerViewController {
-
-    private func setupObservers() {
-        try? AVAudioSession.sharedInstance().setActive(true)
-        AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: NSKeyValueObservingOptions.new, context: nil)
-    }
-
-    private func setupVideoControlsState() {
-        let isShuffleEnabled = playerController.isShuffleEnabled
-        let repeatMode = playerController.isRepeatEnabled
-        playbackService.isShuffleMode = isShuffleEnabled
-        playbackService.repeatMode = repeatMode
-        playModeUpdated()
-    }
-
-    private func setupViews() {
-        view.backgroundColor = .black
-        view.addSubview(mediaNavigationBar)
-        hideSystemVolumeInfo()
-        videoPlayerButtons()
-        if playerController.isRememberStateEnabled {
-            setupVideoControlsState()
-        }
-
-        view.addSubview(optionsNavigationBar)
-        view.addSubview(videoPlayerControls)
-        view.addSubview(scrubProgressBar)
-        view.addSubview(videoOutputView)
-        view.addSubview(brightnessControlView)
-        view.addSubview(volumeControlView)
-        view.addSubview(externalVideoOutputView)
-        view.addSubview(statusLabel)
-        view.addSubview(titleSelectionView)
-
-        view.bringSubviewToFront(statusLabel)
-        view.sendSubviewToBack(videoOutputView)
-        view.insertSubview(backgroundGradientView, aboveSubview: videoOutputView)
-        view.insertSubview(sideBackgroundGradientView, aboveSubview: backgroundGradientView)
-        videoOutputView.addSubview(artWorkImageView)
     }
 
     private func hideSystemVolumeInfo() {
+#if os(iOS)
         volumeView.alpha = 0.00001
         view.addSubview(volumeView)
-    }
-
-    private func setupGestures() {
-        view.addGestureRecognizer(tapOnVideoRecognizer)
-        view.addGestureRecognizer(pinchRecognizer)
-        view.addGestureRecognizer(doubleTapRecognizer)
-        view.addGestureRecognizer(playPauseRecognizer)
-        view.addGestureRecognizer(panRecognizer)
-        view.addGestureRecognizer(leftSwipeRecognizer)
-        view.addGestureRecognizer(rightSwipeRecognizer)
-        view.addGestureRecognizer(upSwipeRecognizer)
-        view.addGestureRecognizer(downSwipeRecognizer)
-
-        panRecognizer.require(toFail: leftSwipeRecognizer)
-        panRecognizer.require(toFail: rightSwipeRecognizer)
-    }
-
-    private func shouldDisableGestures(_ disable: Bool) {
-        tapOnVideoRecognizer.isEnabled = !disable
-        pinchRecognizer.isEnabled = !disable
-        doubleTapRecognizer.isEnabled = !disable
-        playPauseRecognizer.isEnabled = !disable
-        panRecognizer.isEnabled = !disable
-        leftSwipeRecognizer.isEnabled = !disable
-        rightSwipeRecognizer.isEnabled = !disable
-        upSwipeRecognizer.isEnabled = !disable
-        downSwipeRecognizer.isEnabled = !disable
+#endif
     }
 
     private func videoPlayerButtons() {
@@ -1380,203 +1430,17 @@ private extension VideoPlayerViewController {
             videoPlayerControls.aspectRatioButton.isHidden = false
         }
     }
-    // MARK: - Constraints
 
-    private func setupConstraints() {
-        setupVideoOutputConstraints()
-        setupExternalVideoOutputConstraints()
-        setupVideoPlayerControlsConstraints()
-        setupMediaNavigationBarConstraints()
-        setupScrubProgressBarConstraints()
-        setupBrightnessControlConstraints()
-        setupVolumeControlConstraints()
-        setupStatusLabelConstraints()
-        setupTitleSelectionConstraints()
-    }
-
-    private func setupTitleSelectionConstraints() {
-        NSLayoutConstraint.activate([
-            titleSelectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            titleSelectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            titleSelectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            titleSelectionView.topAnchor.constraint(equalTo: view.topAnchor)
-        ])
-    }
-
-    private func setupCommonSliderConstraints(for slider: UIView) {
-        let heightConstraint = slider.heightAnchor.constraint(lessThanOrEqualToConstant: 170)
-        let topConstraint = slider.topAnchor.constraint(equalTo: mediaNavigationBar.bottomAnchor)
-        let bottomConstraint = slider.bottomAnchor.constraint(equalTo: scrubProgressBar.topAnchor, constant: -10)
-        let yConstraint = slider.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        heightConstraint.priority = .required
-        topConstraint.priority = .defaultHigh
-        bottomConstraint.priority = .defaultHigh
-        yConstraint.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            heightConstraint,
-            topConstraint,
-            bottomConstraint,
-            slider.widthAnchor.constraint(equalToConstant: 50),
-            yConstraint,
-        ])
-    }
-
-    private func setupBrightnessControlConstraints() {
-        setupCommonSliderConstraints(for: brightnessControlView)
-        NSLayoutConstraint.activate([
-            brightnessControlView.leadingAnchor.constraint(equalTo: scrubProgressBar.leadingAnchor),
-            brightnessControlView.topAnchor.constraint(greaterThanOrEqualTo: optionsNavigationBar.bottomAnchor)
-        ])
-    }
-
-    private func setupVolumeControlConstraints() {
-        setupCommonSliderConstraints(for: volumeControlView)
-        NSLayoutConstraint.activate([
-            volumeControlView.trailingAnchor.constraint(equalTo: scrubProgressBar.trailingAnchor),
-            volumeControlView.topAnchor.constraint(greaterThanOrEqualTo: optionsNavigationBar.bottomAnchor)
-        ])
-    }
-
-    private func setupVideoOutputConstraints() {
-        videoOutputViewLeadingConstraint = videoOutputView.leadingAnchor.constraint(equalTo: view.leadingAnchor)
-        videoOutputViewTrailingConstraint = videoOutputView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-
-        NSLayoutConstraint.activate([
-            videoOutputViewLeadingConstraint,
-            videoOutputViewTrailingConstraint,
-            videoOutputView.topAnchor.constraint(equalTo: view.topAnchor),
-            videoOutputView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-    }
-
-    private func setupExternalVideoOutputConstraints() {
-        NSLayoutConstraint.activate([
-            externalVideoOutputView.heightAnchor.constraint(equalToConstant: 320),
-            externalVideoOutputView.widthAnchor.constraint(equalToConstant: 320),
-            externalVideoOutputView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            externalVideoOutputView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-        ])
-    }
-
-    private func setupMediaNavigationBarConstraints() {
-        let padding: CGFloat = 16
-        NSLayoutConstraint.activate([
-            mediaNavigationBar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            mediaNavigationBar.leadingAnchor.constraint(equalTo: videoPlayerControls.leadingAnchor, constant: -8),
-            mediaNavigationBar.trailingAnchor.constraint(equalTo: videoPlayerControls.trailingAnchor, constant: 8),
-            mediaNavigationBar.topAnchor.constraint(equalTo: layoutGuide.topAnchor,
-                                                    constant: padding),
-            optionsNavigationBar.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor, constant: -padding),
-            optionsNavigationBar.topAnchor.constraint(equalTo: mediaNavigationBar.bottomAnchor, constant: padding)
-        ])
-    }
-
-    private func setupVideoPlayerControlsConstraints() {
-        let padding: CGFloat = 8
-        let minPadding: CGFloat = 5
-
-        NSLayoutConstraint.activate([
-            videoPlayerControlsHeightConstraint,
-            videoPlayerControls.leadingAnchor.constraint(equalTo: layoutGuide.leadingAnchor,
-                                                         constant: padding),
-            videoPlayerControls.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor,
-                                                          constant: -padding),
-            videoPlayerControls.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor,
-                                                       constant: -2 * minPadding),
-            videoPlayerControlsBottomConstraint
-        ])
-    }
-
-    private func setupScrubProgressBarConstraints() {
-        let margin: CGFloat = 12
-
-        NSLayoutConstraint.activate([
-            scrubProgressBar.leadingAnchor.constraint(equalTo: videoPlayerControls.leadingAnchor),
-            scrubProgressBar.trailingAnchor.constraint(equalTo: videoPlayerControls.trailingAnchor),
-            scrubProgressBar.bottomAnchor.constraint(equalTo: videoPlayerControls.topAnchor, constant: -margin)
-        ])
-    }
-
-    private func setupStatusLabelConstraints() {
-        NSLayoutConstraint.activate([
-            statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-    }
-
-    // MARK: - Observers
-    @objc func systemVolumeDidChange(notification: NSNotification) {
-        let volumelevel = notification.userInfo?["AVSystemController_AudioVolumeNotificationParameter"]
-        UIView.transition(with: volumeControlView, duration: 0.4,
-                          options: .transitionCrossDissolve,
-                          animations : {
-                            self.volumeControlView.updateIcon(level: volumelevel as! Float)
-
-                          })
-    }
-
-    // MARK: - Others
-
-    private func setupForMediaProjection() {
-        let mediaHasProjection = playbackService.currentMediaIs360Video
-
-        fov = mediaHasProjection ? MediaProjection.FOV.default : 0
-
-        // Disable swipe gestures for 360
-        leftSwipeRecognizer.isEnabled = !mediaHasProjection
-        rightSwipeRecognizer.isEnabled = !mediaHasProjection
-        upSwipeRecognizer.isEnabled = !mediaHasProjection
-        downSwipeRecognizer.isEnabled = !mediaHasProjection
-
-        if mediaHasProjection {
-            deviceMotion.startDeviceMotion()
-        }
-    }
-}
-
-internal extension VideoPlayerViewController {
-
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
-        // We're observing outputVolume to handle volume changes from physical volume buttons
-        // To processd properly we have to check we're not interacting with UI controls or gesture
-        if keyPath == "outputVolume" &&
-            !volumeControlView.isBeingTouched && // Check we're not interacting with volume slider
-            !isGestureActive && // Check if the slider did not just changed value
-            currentPanType != .volume { // Check we're not doing pan gestures for volume
-            let appearAnimations = { [volumeControlView] in
-                volumeControlView.alpha = 1
-                }
-            let disappearAnimations = { [volumeControlView] in
-                volumeControlView.alpha = 0
-                }
-            UIView.animate(withDuration:0.2, delay: 0,
-                           options: .beginFromCurrentState,
-                           animations:appearAnimations, completion:nil)
-            UIView.animate(withDuration: 0.2, delay: 1,
-                           options: [],
-                           animations:disappearAnimations, completion:nil)
-            self.volumeControlView.updateIcon(level: AVAudioSession.sharedInstance().outputVolume)
-        }
-    }
-}
-
-// MARK: - Private helpers
-
-private extension VideoPlayerViewController {
     private func setPlayerInterfaceEnabled(_ enabled: Bool) {
         mediaNavigationBar.closePlaybackButton.isEnabled = enabled
-        mediaNavigationBar.deviceButton.isEnabled = enabled
         mediaNavigationBar.queueButton.isEnabled = enabled
-        if #available(iOS 11.0, *) {
-            mediaNavigationBar.airplayRoutePickerView.isUserInteractionEnabled = enabled
-            mediaNavigationBar.airplayRoutePickerView.alpha = !enabled ? 0.5 : 1
-        } else {
-            mediaNavigationBar.airplayVolumeView.isUserInteractionEnabled = enabled
-            mediaNavigationBar.airplayVolumeView.alpha = !enabled ? 0.5 : 1
-        }
+#if os(iOS)
+        mediaNavigationBar.airplayRoutePickerView.isUserInteractionEnabled = enabled
+        mediaNavigationBar.airplayRoutePickerView.alpha = !enabled ? 0.5 : 1
+#endif
 
-        scrubProgressBar.progressSlider.isEnabled = enabled
-        scrubProgressBar.remainingTimeButton.isEnabled = enabled
+        mediaScrubProgressBar.progressSlider.isEnabled = enabled
+        mediaScrubProgressBar.remainingTimeButton.isEnabled = enabled
 
         optionsNavigationBar.videoFiltersButton.isEnabled = enabled
         optionsNavigationBar.playbackSpeedButton.isEnabled = enabled
@@ -1598,7 +1462,7 @@ private extension VideoPlayerViewController {
         videoPlayerControls.aspectRatioButton.isEnabled = enabled
 
         playPauseRecognizer.isEnabled = enabled
-        doubleTapRecognizer.isEnabled = enabled
+        doubleTapGestureRecognizer.isEnabled = enabled
         pinchRecognizer.isEnabled = enabled
         rightSwipeRecognizer.isEnabled = enabled
         leftSwipeRecognizer.isEnabled = enabled
@@ -1606,8 +1470,10 @@ private extension VideoPlayerViewController {
         downSwipeRecognizer.isEnabled = enabled
         panRecognizer.isEnabled = enabled
 
+#if os(iOS)
         brightnessControlView.isEnabled(enabled)
         volumeControlView.isEnabled(enabled)
+#endif
 
         playerController.isInterfaceLocked = !enabled
     }
@@ -1615,49 +1481,29 @@ private extension VideoPlayerViewController {
 
 // MARK: - Delegation
 
-// MARK: - VLCRendererDiscovererManagerDelegate
-
-extension VideoPlayerViewController: VLCRendererDiscovererManagerDelegate {
-    func removedCurrentRendererItem(_ item: VLCRendererItem) {
-        changeVideoOutput(to: videoOutputView)
-        mediaNavigationBar.updateDeviceButton(with: UIImage(named: "renderer"), color: .white)
-    }
-}
-
-// MARK: - DeviceMotionDelegate
-
-extension VideoPlayerViewController: DeviceMotionDelegate {
-    func deviceMotionHasAttitude(deviceMotion: DeviceMotion, pitch: Double, yaw: Double) {
-        if panRecognizer.state != .changed
-            || panRecognizer.state != .began {
-            applyYaw(yaw: CGFloat(yaw), pitch: CGFloat(pitch))
-        }
-    }
-}
-
 // MARK: - VLCPlaybackServiceDelegate
 
-extension VideoPlayerViewController: VLCPlaybackServiceDelegate {
+extension VideoPlayerViewController {
     func prepare(forMediaPlayback playbackService: PlaybackService) {
         mediaNavigationBar.setMediaTitleLabelText("")
         videoPlayerControls.updatePlayPauseButton(toState: playbackService.isPlaying)
 
-        DispatchQueue.main.async {
-            self.updateAudioInterface(with: playbackService.metadata)
-        }
         // FIXME: -
         resetIdleTimer()
     }
 
-    func playbackPositionUpdated(_ playbackService: PlaybackService) {
-        scrubProgressBar.updateInterfacePosition()
-    }
+    override func mediaPlayerStateChanged(_ currentState: VLCMediaPlayerState,
+                                          isPlaying: Bool,
+                                          currentMediaHasTrackToChooseFrom: Bool, currentMediaHasChapters: Bool,
+                                          for playbackService: PlaybackService) {
+        super.mediaPlayerStateChanged(currentState,
+                                      isPlaying: isPlaying,
+                                      currentMediaHasTrackToChooseFrom: currentMediaHasTrackToChooseFrom,
+                                      currentMediaHasChapters: currentMediaHasChapters,
+                                      for: playbackService)
 
-    func mediaPlayerStateChanged(_ currentState: VLCMediaPlayerState,
-                                 isPlaying: Bool,
-                                 currentMediaHasTrackToChooseFrom: Bool, currentMediaHasChapters: Bool,
-                                 for playbackService: PlaybackService) {
         videoPlayerControls.updatePlayPauseButton(toState: isPlaying)
+        videoPlayerControls.shouldEnableSeekButtons(playbackService.mediaList.count == 1)
 
         if currentState == .error {
             statusLabel.showStatusMessage(NSLocalizedString("PLAYBACK_FAILED",
@@ -1668,6 +1514,14 @@ extension VideoPlayerViewController: VLCPlaybackServiceDelegate {
             resetABRepeat()
         }
 
+        let media = VLCMLMedia(forPlaying: playbackService.currentlyPlayingMedia)
+        if let media = media, currentState == .opening &&
+            (media.type() == .audio && playbackService.numberOfVideoTracks == 0) {
+            // This media is audio only and can be played with the Audio Player.
+            delegate?.videoPlayerViewControllerShouldSwitchPlayer(self)
+            return
+        }
+
         if titleSelectionView.isHidden == false {
             titleSelectionView.updateHeightConstraints()
             titleSelectionView.reload()
@@ -1676,19 +1530,24 @@ extension VideoPlayerViewController: VLCPlaybackServiceDelegate {
         if let queueCollectionView = queueViewController?.queueCollectionView {
             queueCollectionView.reloadData()
         }
+
         moreOptionsActionSheet.currentMediaHasChapters = currentMediaHasChapters
-    }
 
-    func showStatusMessage(_ statusMessage: String) {
-        statusLabel.showStatusMessage(statusMessage)
-    }
-
-    func playbackServiceDidSwitch(_ aspectRatio: Int) {
-        // subControls.isInFullScreen = aspectRatio == .fillToScreen
-
-        if #available(iOS 11.0, *) {
-            adaptVideoOutputToNotch()
+        if currentState == .opening {
+            updateAudioInterface(with: playbackService.metadata)
+            if UserDefaults.standard.bool(forKey: kVLCSettingRotationLock) {
+                videoPlayerControls.handleRotationLockButton(videoPlayerControls)
+            }
         }
+
+        if currentState == .stopped {
+            supportedInterfaceOrientations = .allButUpsideDown
+            videoPlayerControls.rotationLockButton.tintColor = .white
+        }
+    }
+
+    func playbackServiceDidSwitchAspectRatio(_ aspectRatio: Int) {
+        adaptVideoOutputToNotch()
     }
 
     func displayMetadata(for playbackService: PlaybackService, metadata: VLCMetaData) {
@@ -1702,12 +1561,16 @@ extension VideoPlayerViewController: VLCPlaybackServiceDelegate {
         mediaNavigationBar.setMediaTitleLabelText(metadata.title)
 
         if playbackService.isPlayingOnExternalScreen() {
-            externalVideoOutputView.updateUI(rendererItem: playbackService.renderer, title: metadata.title)
+#if os(iOS)
+            if let renderer = playbackService.renderer {
+                externalVideoOutputView.updateUI(rendererName: playbackService.renderer?.name, title: metadata.title)
+            }
+#else
+            externalVideoOutputView.updateUI(rendererName: nil, title: metadata.title)
+#endif
         } else {
             self.externalVideoOutputView.isHidden = true
         }
-
-        updateAudioInterface(with: metadata)
 
         videoPlayerButtons()
     }
@@ -1722,7 +1585,11 @@ extension VideoPlayerViewController: VLCPlaybackServiceDelegate {
             }
 
             // Only show the artwork when not casting to a device.
+#if os(iOS)
             artWorkImageView.isHidden = playbackService.renderer != nil ? true : false
+#else
+            artWorkImageView.isHidden = false
+#endif
             artWorkImageView.clipsToBounds = true
             artWorkImageView.contentMode = .scaleAspectFit
             playbackService.videoOutputView = nil
@@ -1752,6 +1619,14 @@ extension VideoPlayerViewController: VLCPlaybackServiceDelegate {
 
         videoPlayerControls.shuffleButton.tintColor = playbackService.isShuffleMode ? orangeColor : .white
     }
+
+    override func reloadPlayQueue() {
+        guard let queueViewController = queueViewController else {
+            return
+        }
+
+        queueViewController.reload()
+    }
 }
 
 // MARK: - PlayerControllerDelegate
@@ -1775,14 +1650,12 @@ extension VideoPlayerViewController: PlayerControllerDelegate {
     }
 }
 
-// MARK: -
-
 // MARK: - MediaNavigationBarDelegate
 
-extension VideoPlayerViewController: MediaNavigationBarDelegate {
-    func mediaNavigationBarDidTapClose(_ mediaNavigationBar: MediaNavigationBar) {
-        playbackService.stopPlayback()
-        playbackService.setPlayAsAudio(false)
+extension VideoPlayerViewController {
+    override func mediaNavigationBarDidTapClose(_ mediaNavigationBar: MediaNavigationBar) {
+        super.mediaNavigationBarDidTapClose(mediaNavigationBar)
+        playbackService.playAsAudio = false
     }
 
     func mediaNavigationBarDidToggleQueueView(_ mediaNavigationBar: MediaNavigationBar) {
@@ -1802,7 +1675,7 @@ extension VideoPlayerViewController: MediaNavigationBarDelegate {
             videoPlayerControls.rotationLockButton.isEnabled = false
             videoPlayerControls.aspectRatioButton.isEnabled = false
             videoPlayerControls.moreActionsButton.isEnabled = false
-            view.bringSubviewToFront(scrubProgressBar)
+            view.bringSubviewToFront(mediaScrubProgressBar)
             view.bringSubviewToFront(videoPlayerControls)
             setControlsHidden(true, animated: true)
             qvc.bottomConstraint?.constant = 0
@@ -1818,42 +1691,36 @@ extension VideoPlayerViewController: MediaNavigationBarDelegate {
         // NSAssert(0, @"didToggleChromeCast not implemented");
     }
 
-    func mediaNavigationBarDidCloseLongPress(_ mediaNavigationBar: MediaNavigationBar) {
+    override func mediaNavigationBarDidCloseLongPress(_ mediaNavigationBar: MediaNavigationBar) {
         delegate?.videoPlayerViewControllerDidMinimize(self)
     }
 
     func mediaNavigationBarDisplayCloseAlert(_ mediaNavigationBar: MediaNavigationBar) {
         statusLabel.showStatusMessage(NSLocalizedString("MINIMIZE_HINT", comment: ""))
     }
+
+    func mediaNavigationBarDidTapPictureInPicture(_ mediaNavigationBar: MediaNavigationBar) {
+        playbackService.togglePictureInPicture()
+    }
 }
 
 // MARK: - MediaScrubProgressBarDelegate
 
-extension VideoPlayerViewController: MediaScrubProgressBarDelegate {
+extension VideoPlayerViewController {
     func mediaScrubProgressBarShouldResetIdleTimer() {
         resetIdleTimer()
-    }
-
-    func mediaScrubProgressBarSetPlaybackPosition(to value: Float) {
-        playbackService.playbackPosition = value
-    }
-
-    func mediaScrubProgressBarGetAMark() -> ABRepeatMarkView {
-        return aMark
-    }
-
-    func mediaScrubProgressBarGetBMark() -> ABRepeatMarkView {
-        return bMark
     }
 }
 
 // MARK: - MediaMoreOptionsActionSheetDelegate
 
-extension VideoPlayerViewController: MediaMoreOptionsActionSheetDelegate {
-    func mediaMoreOptionsActionSheetDidToggleInterfaceLock(state: Bool) {
+extension VideoPlayerViewController {
+    override func mediaMoreOptionsActionSheetDidToggleInterfaceLock(state: Bool) {
+#if os(iOS)
         let mask = getInterfaceOrientationMask(orientation: UIApplication.shared.statusBarOrientation)
 
         supportedInterfaceOrientations = supportedInterfaceOrientations == .allButUpsideDown ? mask : .allButUpsideDown
+#endif
 
         setPlayerInterfaceEnabled(!state)
     }
@@ -1862,253 +1729,86 @@ extension VideoPlayerViewController: MediaMoreOptionsActionSheetDelegate {
         handleTapOnVideo()
     }
 
-    func mediaMoreOptionsActionSheetShowIcon(for option: OptionsNavigationBarIdentifier) {
+    override func mediaMoreOptionsActionSheetShowIcon(for option: OptionsNavigationBarIdentifier) {
         switch option {
         case .videoFilters:
             showIcon(button: optionsNavigationBar.videoFiltersButton)
-            return
-        case .playbackSpeed:
-            showIcon(button: optionsNavigationBar.playbackSpeedButton)
-            return
-        case .equalizer:
-            showIcon(button: optionsNavigationBar.equalizerButton)
-            return
-        case .sleepTimer:
-            showIcon(button: optionsNavigationBar.sleepTimerButton)
-            return
-        case .abRepeat:
-            showIcon(button: optionsNavigationBar.abRepeatButton)
-            return
-        case .abRepeatMarks:
-            showIcon(button: optionsNavigationBar.abRepeatMarksButton)
-            return
+            break
         default:
-            assertionFailure("VideoPlayerViewController: Option not valid.")
+            super.mediaMoreOptionsActionSheetShowIcon(for: option)
         }
     }
 
-    func mediaMoreOptionsActionSheetHideIcon(for option: OptionsNavigationBarIdentifier) {
+    override func mediaMoreOptionsActionSheetHideIcon(for option: OptionsNavigationBarIdentifier) {
         switch option {
         case .videoFilters:
             hideIcon(button: optionsNavigationBar.videoFiltersButton)
-            return
-        case .playbackSpeed:
-            hideIcon(button: optionsNavigationBar.playbackSpeedButton)
-            return
-        case .equalizer:
-            hideIcon(button: optionsNavigationBar.equalizerButton)
-            return
-        case .sleepTimer:
-            hideIcon(button: optionsNavigationBar.sleepTimerButton)
-            return
-        case .abRepeat:
-            hideIcon(button: optionsNavigationBar.abRepeatButton)
-            return
-        case .abRepeatMarks:
-            hideIcon(button: optionsNavigationBar.abRepeatMarksButton)
-            return
+            break
         default:
-            assertionFailure("VideoPlayerViewController: Option not valid.")
+            super.mediaMoreOptionsActionSheetHideIcon(for: option)
         }
     }
 
-    func mediaMoreOptionsActionSheetHideAlertIfNecessary() {
-        if let alert = alertController {
-            alert.dismiss(animated: true, completion: nil)
-            alertController = nil
-        }
-    }
-
-    func mediaMoreOptionsActionSheetPresentPopupView(withChild child: UIView) {
-        if let equalizerView = child as? EqualizerView {
-            guard !equalizerPopupView.isShown else {
-                return
-            }
-
-            showPopup(equalizerPopupView, with: equalizerView, accessoryViewsDelegate: equalizerView)
-        }
-    }
-
-    func mediaMoreOptionsActionSheetUpdateProgressBar() {
-        if !playbackService.isPlaying {
-            playbackService.playPause()
-        }
-    }
-
-    func mediaMoreOptionsActionSheetGetCurrentMedia() -> VLCMLMedia? {
-        guard let media = playbackService.currentlyPlayingMedia else {
-            return nil
-        }
-
-        let currentMedia = mediaLibraryService.fetchMedia(with: media.url)
-        return currentMedia
-    }
-
-    func mediaMoreOptionsActionSheetDidSelectBookmark(value: Float) {
-        scrubProgressBar.updateSliderWithValue(value: value)
-        if !playbackService.isPlaying {
-            playbackService.playPause()
-        }
-    }
-
-    private func openOptionView(view: ActionSheetCellIdentifier) {
-        present(moreOptionsActionSheet, animated: true, completion: {
-            self.moreOptionsActionSheet.addView(view)
-        })
-    }
-
-    func mediaMoreOptionsActionSheetDisplayAlert(title: String, message: String, action: BookmarkActionIdentifier, index: Int, isEditing: Bool) {
-        let completion = {
-            let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
-
-            var actionTitle = NSLocalizedString("BUTTON_CANCEL", comment: "")
-            let cancelAction = UIAlertAction(title: actionTitle, style: .cancel) { _ in
-                if !isEditing {
-                    self.openOptionView(view: .bookmarks)
-                }
-            }
-
-            alertController.addAction(cancelAction)
-
-            if action == .delete {
-                actionTitle = NSLocalizedString("BUTTON_DELETE", comment: "")
-                let mainAction = UIAlertAction(title: actionTitle, style: .destructive, handler: { _ in
-                    self.moreOptionsActionSheet.deleteBookmarkAt(row: index)
-                    if !isEditing {
-                        self.openOptionView(view: .bookmarks)
-                    }
-                })
-
-                alertController.addAction(mainAction)
-            } else if action == .rename {
-                alertController.addTextField(configurationHandler: { field in
-                    field.text = message
-                    field.returnKeyType = .done
-                })
-
-                actionTitle = NSLocalizedString("BUTTON_RENAME", comment: "")
-                let mainAction = UIAlertAction(title: actionTitle, style: .default, handler: { _ in
-                    guard let field = alertController.textFields else {
-                        return
-                    }
-
-                    guard let newName = field[0].text else {
-                        return
-                    }
-
-                    self.moreOptionsActionSheet.renameBookmarkAt(name: newName, row: index)
-
-                    if !isEditing {
-                        self.openOptionView(view: .bookmarks)
-                    }
-                })
-
-                alertController.addAction(mainAction)
-            }
-
-            self.setControlsHidden(true, animated: true)
-            self.present(alertController, animated: true, completion: nil)
-            self.alertController = alertController
-        }
-
-        // iOS 12.0 and below versions do not execute the completion if the dismiss call is not performed,
-        // here the check is necessary in order to enable the edit actions for these iOS versions.
-        if addBookmarksView == nil {
-            moreOptionsActionSheet.dismiss(animated: true, completion: completion)
-        } else {
-            completion()
-        }
-    }
-
-    func mediaMoreOptionsActionSheetDisplayAddBookmarksView(_ bookmarksView: AddBookmarksView) {
-        shouldDisableGestures(true)
-
-        mediaNavigationBar.isHidden = true
-
-        bookmarksView.translatesAutoresizingMaskIntoConstraints = false
-
-        addBookmarksView = bookmarksView
+    override func mediaMoreOptionsActionSheetDisplayAddBookmarksView(_ bookmarksView: AddBookmarksView) {
+        super.mediaMoreOptionsActionSheetDisplayAddBookmarksView(bookmarksView)
 
         if let bookmarksView = addBookmarksView {
             view.addSubview(bookmarksView)
             NSLayoutConstraint.activate([
-                bookmarksView.centerXAnchor.constraint(equalTo: layoutGuide.centerXAnchor),
-                bookmarksView.leadingAnchor.constraint(equalTo: layoutGuide.leadingAnchor),
-                bookmarksView.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor),
-                bookmarksView.topAnchor.constraint(equalTo: layoutGuide.topAnchor, constant: 16),
-                bookmarksView.bottomAnchor.constraint(lessThanOrEqualTo: scrubProgressBar.topAnchor),
+                bookmarksView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+                bookmarksView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+                bookmarksView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+                bookmarksView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+                bookmarksView.bottomAnchor.constraint(lessThanOrEqualTo: mediaScrubProgressBar.topAnchor),
             ])
         }
 
         if let safeIdleTimer = idleTimer {
             safeIdleTimer.invalidate()
         }
+
         videoPlayerControls.shouldDisableControls(true)
         setControlsHidden(true, animated: true)
     }
 
-    func mediaMoreOptionsActionSheetRemoveAddBookmarksView() {
-        shouldDisableGestures(false)
+    override func mediaMoreOptionsActionSheetRemoveAddBookmarksView() {
+        super.mediaMoreOptionsActionSheetRemoveAddBookmarksView()
 
-        mediaNavigationBar.isHidden = false
-
-        if let bookmarksView = addBookmarksView {
-            bookmarksView.removeFromSuperview()
-        }
-
-        addBookmarksView = nil
         idleTimer = nil
         resetIdleTimer()
         videoPlayerControls.shouldDisableControls(false)
     }
 
-    func mediaMoreOptionsActionSheetDidToggleShuffle(_ mediaMoreOptionsActionSheet: MediaMoreOptionsActionSheet) {
+    override func mediaMoreOptionsActionSheetDidToggleShuffle(_ mediaMoreOptionsActionSheet: MediaMoreOptionsActionSheet) {
         videoPlayerControlsDelegateShuffle(videoPlayerControls)
         mediaMoreOptionsActionSheet.collectionView.reloadData()
     }
 
-    func mediaMoreOptionsActionSheetDidTapRepeat(_ mediaMoreOptionsActionSheet: MediaMoreOptionsActionSheet) {
+    override func mediaMoreOptionsActionSheetDidTapRepeat(_ mediaMoreOptionsActionSheet: MediaMoreOptionsActionSheet) {
         videoPlayerControlsDelegateRepeat(videoPlayerControls)
         mediaMoreOptionsActionSheet.collectionView.reloadData()
     }
 
-    func mediaMoreOptionsActionSheetPresentABRepeatView(with abView: ABRepeatView) {
-        abView.translatesAutoresizingMaskIntoConstraints = false
-        abRepeatView = abView
+    override func mediaMoreOptionsActionSheetPresentABRepeatView(with abView: ABRepeatView) {
+        super.mediaMoreOptionsActionSheetPresentABRepeatView(with: abView)
 
         guard let abRepeatView = abRepeatView else {
             return
         }
 
-        abRepeatView.aMarkView.isHidden = false
-
         view.addSubview(abRepeatView)
         view.bringSubviewToFront(abRepeatView)
         abRepeatView.isUserInteractionEnabled = true
         NSLayoutConstraint.activate([
-            abRepeatView.centerXAnchor.constraint(equalTo: layoutGuide.centerXAnchor),
-            abRepeatView.bottomAnchor.constraint(equalTo: scrubProgressBar.topAnchor, constant: -20.0),
+            abRepeatView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            abRepeatView.bottomAnchor.constraint(equalTo: mediaScrubProgressBar.topAnchor, constant: -20.0),
         ])
-
-        scrubProgressBar.shouldHideScrubLabels = true
-    }
-
-    func mediaMoreOptionsActionSheetDidSelectAMark() {
-        scrubProgressBar.setMark(aMark)
-        aMark.isEnabled = true
-    }
-
-    func mediaMoreOptionsActionSheetDidSelectBMark() {
-        scrubProgressBar.setMark(bMark)
-        bMark.isEnabled = true
-        scrubProgressBar.shouldHideScrubLabels = false
-        abRepeatView?.removeFromSuperview()
     }
 }
 
 // MARK: - OptionsNavigationBarDelegate
 
-extension VideoPlayerViewController: OptionsNavigationBarDelegate {
+extension VideoPlayerViewController {
     private func resetVideoFilters() {
         hideIcon(button: optionsNavigationBar.videoFiltersButton)
         moreOptionsActionSheet.resetVideoFilters()
@@ -2145,14 +1845,6 @@ extension VideoPlayerViewController: OptionsNavigationBarDelegate {
         mediaMoreOptionsActionSheetPresentABRepeatView(with: abRepeatView)
     }
 
-    private func resetABRepeat() {
-        hideIcon(button: optionsNavigationBar.abRepeatButton)
-        if let abRepeatView = abRepeatView {
-            abRepeatView.removeFromSuperview()
-        }
-        resetABRepeatMarks()
-    }
-
     private func showIcon(button: UIButton) {
         UIView.animate(withDuration: 0.5, animations: {
             button.isHidden = false
@@ -2186,29 +1878,8 @@ extension VideoPlayerViewController: OptionsNavigationBarDelegate {
             resetABRepeatMarks(true)
             return
         default:
-            assertionFailure("VideoPlayerViewController: Unvalid button.")
+            assertionFailure("VideoPlayerViewController: Invalid button.")
         }
-    }
-
-    func optionsNavigationBarDisplayAlert(title: String, message: String, button: UIButton) {
-        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
-
-        let cancelButton = UIAlertAction(title: "Cancel", style: .cancel)
-
-        let resetButton = UIAlertAction(title: "Reset", style: .destructive) { _ in
-            self.handleReset(button: button)
-        }
-
-        alertController.addAction(cancelButton)
-        alertController.addAction(resetButton)
-
-        self.present(alertController, animated: true, completion: nil)
-        self.alertController = alertController
-    }
-
-    func optionsNavigationBarGetRemainingTime() -> String {
-        let remainingTime = moreOptionsActionSheet.getRemainingTime()
-        return remainingTime
     }
 }
 
@@ -2217,8 +1888,8 @@ extension VideoPlayerViewController: OptionsNavigationBarDelegate {
 extension VideoPlayerViewController {
     @objc func downloadMoreSPU() {
         let targetViewController: VLCPlaybackInfoSubtitlesFetcherViewController =
-            VLCPlaybackInfoSubtitlesFetcherViewController(nibName: nil,
-                                                          bundle: nil)
+        VLCPlaybackInfoSubtitlesFetcherViewController(nibName: nil,
+                                                      bundle: nil)
         targetViewController.title = NSLocalizedString("DOWNLOAD_SUBS_FROM_OSO",
                                                        comment: "")
 
@@ -2227,58 +1898,14 @@ extension VideoPlayerViewController {
     }
 }
 
-// MARK: - Popup methods
-
-extension VideoPlayerViewController {
-    func showPopup(_ popupView: PopupView, with contentView: UIView, accessoryViewsDelegate: PopupViewAccessoryViewsDelegate? = nil) {
-        shouldDisableGestures(true)
-        videoPlayerControls.moreActionsButton.isEnabled = false
-        popupView.isShown = true
-
-        popupView.addContentView(contentView, constraintWidth: true)
-        if let accessoryViewsDelegate = accessoryViewsDelegate {
-            popupView.accessoryViewsDelegate = accessoryViewsDelegate
-        }
-
-        view.addSubview(popupView)
-
-        let iPhone5width: CGFloat = 320
-        let leadingConstraint = popupView.leadingAnchor.constraint(equalTo: mainLayoutGuide.leadingAnchor, constant: 10)
-        let trailingConstraint = popupView.trailingAnchor.constraint(equalTo: mainLayoutGuide.trailingAnchor, constant: -10)
-        leadingConstraint.priority = .required
-        trailingConstraint.priority = .required
-
-        let popupViewTopConstraint: NSLayoutConstraint
-        let popupViewBottomConstraint: NSLayoutConstraint
-        if popupView == equalizerPopupView {
-            popupViewTopConstraint = equalizerPopupTopConstraint
-            popupViewBottomConstraint = equalizerPopupBottomConstraint
-        } else {
-            popupViewTopConstraint = trackSelectorPopupTopConstraint
-            popupViewBottomConstraint = trackSelectorPopupBottomConstraint
-        }
-        let newConstraints = [
-            popupViewTopConstraint,
-            popupViewBottomConstraint,
-            leadingConstraint,
-            trailingConstraint,
-            popupView.centerXAnchor.constraint(equalTo: mainLayoutGuide.centerXAnchor),
-            popupView.widthAnchor.constraint(greaterThanOrEqualToConstant: iPhone5width)
-        ]
-        NSLayoutConstraint.activate(newConstraints)
-    }
-}
-
 // MARK: - PopupViewDelegate
 
-extension VideoPlayerViewController: PopupViewDelegate {
-    func popupViewDidClose(_ popupView: PopupView) {
-        popupView.isShown = false
+extension VideoPlayerViewController {
+    override func popupViewDidClose(_ popupView: PopupView) {
+        super.popupViewDidClose(popupView)
         videoPlayerControls.moreActionsButton.isEnabled = true
         videoPlayerControlsHeightConstraint.constant = 44
-        scrubProgressBar.spacing = 5
-
-        shouldDisableGestures(false)
+        mediaScrubProgressBar.spacing = 5
         resetIdleTimer()
     }
 }
@@ -2298,85 +1925,6 @@ extension VideoPlayerViewController: QueueViewControllerDelegate {
     }
 }
 
-// MARK: - Keyboard Controls
-
-extension VideoPlayerViewController {
-    @objc func keyLeftArrow() {
-        jumpBackwards(seekBackwardBy)
-    }
-
-    @objc func keyRightArrow() {
-        jumpForwards(seekForwardBy)
-    }
-
-    @objc func keyRightBracket() {
-        playbackService.playbackRate *= 1.5
-    }
-
-    @objc func keyLeftBracket() {
-        playbackService.playbackRate *= 0.75
-    }
-
-    @objc func keyEqual() {
-        playbackService.playbackRate = 1.0
-    }
-
-    override var keyCommands: [UIKeyCommand]? {
-        var commands: [UIKeyCommand] = [
-            UIKeyCommand(input: " ",
-                         modifierFlags: [],
-                         action: #selector(handlePlayPauseGesture),
-                         discoverabilityTitle: NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")),
-            UIKeyCommand(input: "\r",
-                         modifierFlags: [],
-                         action: #selector(handlePlayPauseGesture),
-                         discoverabilityTitle: NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")),
-            UIKeyCommand(input: UIKeyCommand.inputLeftArrow,
-                         modifierFlags: [],
-                         action: #selector(keyLeftArrow),
-                         discoverabilityTitle: NSLocalizedString("KEY_JUMP_BACKWARDS", comment: "")),
-            UIKeyCommand(input: UIKeyCommand.inputRightArrow,
-                         modifierFlags: [],
-                         action: #selector(keyRightArrow),
-                         discoverabilityTitle: NSLocalizedString("KEY_JUMP_FORWARDS", comment: "")),
-            UIKeyCommand(input: "[",
-                         modifierFlags: [],
-                         action: #selector(keyRightBracket),
-                         discoverabilityTitle: NSLocalizedString("KEY_INCREASE_PLAYBACK_SPEED", comment: "")),
-            UIKeyCommand(input: "]",
-                         modifierFlags: [],
-                         action: #selector(keyLeftBracket),
-                         discoverabilityTitle: NSLocalizedString("KEY_DECREASE_PLAYBACK_SPEED", comment: ""))
-        ]
-
-        if abs(playbackService.playbackRate - 1.0) > .ulpOfOne {
-            commands.append(UIKeyCommand(input: "=",
-                                         modifierFlags: [],
-                                         action: #selector(keyEqual),
-                                         discoverabilityTitle: NSLocalizedString("KEY_RESET_PLAYBACK_SPEED",
-                                                                                 comment: "")))
-        }
-
-        if #available(iOS 15, *) {
-            commands.forEach {
-                if $0.input == UIKeyCommand.inputRightArrow
-                    || $0.input == UIKeyCommand.inputLeftArrow {
-                    ///UIKeyCommand.wantsPriorityOverSystemBehavior is introduced in iOS 15 SDK
-                    ///but we actually still use Xcode 12.4 on CI. This old version only provides
-                    ///SDK for iOS 14.4 max. Hence we use ObjC apis to call the method and still
-                    ///have the ability to build with older Xcode versions.
-                    let selector = NSSelectorFromString("setWantsPriorityOverSystemBehavior:")
-                    if $0.responds(to: selector) {
-                        $0.perform(selector, with: true)
-                    }
-                }
-            }
-        }
-
-        return commands
-    }
-}
-
 // MARK: - TitleSelectionViewDelegate
 
 extension VideoPlayerViewController: TitleSelectionViewDelegate {
@@ -2385,7 +1933,7 @@ extension VideoPlayerViewController: TitleSelectionViewDelegate {
         vc.delegate = self
         present(vc, animated: true)
     }
-    
+
     func titleSelectionViewDelegateDidSelectTrack(_ titleSelectionView: TitleSelectionView) {
         titleSelectionView.isHidden = true
     }
@@ -2403,9 +1951,11 @@ extension VideoPlayerViewController: TitleSelectionViewDelegate {
 
 extension VideoPlayerViewController: UIDocumentPickerDelegate {
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let mediaURL = playbackService.currentlyPlayingMedia?.url else { return }
-        guard let fileURL = urls.first else { return }
-                
+        guard let mediaURL = playbackService.currentlyPlayingMedia?.url,
+              let fileURL = urls.first else {
+            return
+        }
+
         let mediaURLPath = mediaURL.path
         let filename = mediaURL.lastPathComponent as NSString
         let fileManager = FileManager.default
@@ -2427,6 +1977,7 @@ extension VideoPlayerViewController: UIDocumentPickerDelegate {
             }
             pathComponent = "\(kVLCSubtitlesCacheFolderName)/\(filename.deletingPathExtension)"
         }
+
         var destinationPath = (documentFolderPath as NSString).appendingPathComponent("\(pathComponent).\(fileURL.pathExtension)")
         var index = 0
 
@@ -2442,13 +1993,12 @@ extension VideoPlayerViewController: UIDocumentPickerDelegate {
                 return
             }
             fileURL.stopAccessingSecurityScopedResource()
-            
+
             if fileURL.pathExtension.contains("srt") {
                 playbackService.addSubtitlesToCurrentPlayback(from: URL(fileURLWithPath: destinationPath))
             } else {
                 playbackService.addAudioToCurrentPlayback(from: URL(fileURLWithPath: destinationPath))
             }
-            
         } else {
             return
         }
@@ -2512,5 +2062,13 @@ extension VideoPlayerViewController: ActionSheetDataSource {
 extension VideoPlayerViewController: ActionSheetCellDelegate {
     func actionSheetCellShouldUpdateColors() -> Bool {
         return true
+    }
+}
+
+// MARK: - SliderInfoViewDelegate
+
+extension VideoPlayerViewController: SliderInfoViewDelegate {
+    func sliderInfoViewDidReceiveTouch(_ sliderInfoView: SliderInfoView) {
+        resetIdleTimer()
     }
 }

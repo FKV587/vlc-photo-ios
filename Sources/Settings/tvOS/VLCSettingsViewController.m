@@ -201,6 +201,24 @@
         [alertController addAction:saveAction];
 
         [self presentViewController:alertController animated:YES completion:nil];
+    } else if ([specifierType isEqualToString:kIASKButtonSpecifier] && [specifier.key isEqualToString:kVLCSettingReset]) {
+        UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"SETTINGS_RESET_TITLE", "")
+                                                                                 message:NSLocalizedString(@"SETTINGS_RESET_MESSAGE", "")
+                                                                          preferredStyle:UIAlertControllerStyleAlert];
+
+        UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_CANCEL", "")
+                                                               style:UIAlertActionStyleCancel
+                                                             handler:nil];
+        UIAlertAction *resetAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_RESET", "")
+                                                              style:UIAlertActionStyleDestructive
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+            [self resetSettings];
+        }];
+
+        [alertController addAction:cancelAction];
+        [alertController addAction:resetAction];
+
+        [self presentViewController:alertController animated:YES completion:nil];
     } else {
         VLCAboutViewController *targetViewController = [[VLCAboutViewController alloc] initWithNibName:nil bundle:nil];
         targetViewController.title = specifier.title;
@@ -210,5 +228,12 @@
     }
 }
 
+- (void)resetSettings
+{
+    NSString *bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bundleIdentifier];
+
+    [_tableView reloadData];
+}
 
 @end

@@ -1,5 +1,163 @@
 # Changelog
 
+## iOS [4.0.0]
+· VLC now requires iOS 12 or later
+· 32bit iOS devices are no longer supported :(
+· Update to libvlc v4 with all its features (new clock, player, playlist and more)
+· Add HDR playback
+· Add multi-channel and spatial audio
+· Add Picture-in-Picture playback
+· Add support for visionOS
+· Add App-Intent to play media (iOS 16.4 and later)
+· Audio player: Add seek backward/forward buttons
+· Add play count metadata to media long press UI
+· Add supports for passcodes with four and six digits
+· Cloud services: allow downloads of entire folders and to favorite them
+· Major accessbility improvements for the playback interface
+· Last played item in a playlist is now indicate
+· Improve brightness restoration and handling
+· Add Multipath TCP (MPTCP) support
+· New support for the IMM4, 708, AGM, VP4 codecs
+· New support for HEIF images, DASH WebM, DVBSUB in mkv, chapters in mp3 files, DMX audio
+· New support for the RIST, AMT and Gopher protocols
+· Remove support for the real player dialect of RTSP
+· Improve proxy configuration handling
+· Fix silence for a split second when starting playback
+· Add option to force the video playback orientation lock
+· Seek playback using the number keys on external keyboards
+· Add options to skip forward/back instead of go to next/previous track
+    - on lockscreen and when using external controls (like headphones and car controls)
+· Integrate with the pCloud service
+
+Known issues:
+· Thumbnailing content is broken
+
+## iOS [3.6.4]
+· Fix another edge-case of silent playback recovery
+
+## iOS [3.6.3]
+· Fix silence on repeat
+· Correctly restore previous audio and subtitles track selection on continued playback
+· Add support for ATRAC3 audio metadata
+
+## iOS [3.6.2]
+· Add option to disable restoring the last played media
+· Fix the player's options reset
+· Fix the resume playback feature
+· Fix the playback state saving
+
+## iOS [3.6.1]
+· Fix playback of media stored locally on device outside the application context
+
+## iOS [3.6.0]
+· Add rotation during video playback to show the video independent of the actual state of the device
+· Add support for custom equalizer profiles
+· Add support for playing entire folders and multiple files on iOS 11 and above stored outside the VLC context
+· Rewrite OpenSubtitles.org integration using the JSON API and improve search
+· Improve search of locally stored content with regex matching
+· Continue playback of the last playing media
+· Fix issue when deleting, renaming or sharing locally stored media
+· Fix issue when calculating the remaining free space of a device
+· Add option to disable long press gesture to increase speed
+· Major updates of the Spanish and Portuguese translations including their varieties
+
+## tvOS [3.6.0]
+· Rewrite OpenSubtitles.org integration using the JSON API
+· Fix issue when calculating the remaining free space of a device
+· Major updates of the Spanish and Portuguese translations including their varieties
+
+## iOS [3.5.10]
+· Fix stability issues when decoding specific AV1 content on 64bit devices
+· Fix silence when playing specific content in the OPUS format
+· Add long press gesture to speed up playback speed
+· Stability improvements
+
+## tvOS [3.5.10]
+· Fix stability issues when decoding specific AV1 content
+· Fix silence when playing specific content in the OPUS format
+· Stability improvements
+
+## iOS [3.5.9]
+· Layout improvements for the audio library, equalizer
+· Improve support for shortcuts when using an external keyboard
+· Add option to disable subtitles by default
+· Improve behavior when going to the next item in repeat-one mode
+· Stability improvements and minor bug fixes
+· An equalizer profile's pre-amp level is no longer overwritten
+· Minor improvements when browsing UPnP shares and favoriting them
+· Fix playback of certain media shared by VLC instances on the local network
+· Update libvlc to 3.0.21
+· Update FFmpeg to 4.4.4, dav1d to 1.4.2, libvpx to 1.14.1
+· Fix security integer overflow in MMS module
+· Fix potential denial-of-service attack against the WiFi Sharing feature
+  which allows unnoticed arbitrary data uploads within the application context
+· Fix various warnings, leaks and potential crashes
+· Improve subtitles rendering of notably Asian languages by correcting font
+  fallback lookups
+
+## tvOS [3.5.9]
+· Add support for 360° video
+· Add option to disable subtitles by default
+· Stability improvements and minor bug fixes
+· Minor improvements when browsing UPnP shares and favoriting them
+· Fix playback of certain media shared by VLC instances on the local network
+· Update libvlc to 3.0.21
+· Update FFmpeg to 4.4.4, dav1d to 1.4.2, libvpx to 1.14.1
+· Fix security integer overflow in MMS module
+· Fix various warnings, leaks and potential crashes
+· Improve subtitles rendering of notably Asian languages by correcting font
+  fallback lookups
+
+## iOS [3.5.7]
+· Fix runtime exceptions on iOS 9
+· Improve the donation process
+· Update the play queue according to the shuffle state
+· Fix the favorites authentication
+
+## tvOS [3.5.7]
+· Fix the favorites authentication and saving location
+· Improve the favorites navigation
+
+## iOS [3.5.6]
+· Fix UPnP browsing
+· Improve the favorites layout
+
+## tvOS [3.5.6]
+· Fix UPnP browsing
+· Relocate favorites button
+· Improve the favorites layout
+
+## iOS [3.5.5]
+· Minor improvements
+
+## iOS [3.5.4]
+· Fix login to network shares, especially with complex addresses
+· Add option to always play media opened through third-party apps
+
+## tvOS [3.5.4]
+· Fix login to network shares, especially with complex addresses
+· Hide UI promptly when playback continues
+· Fix cleaning of cached media when the app relaunches
+
+## iOS [3.5.3]
+· Fix browsing UPnP and SMB shares
+
+## tvOS [3.5.3]
+· Fix browsing UPnP and SMB shares
+
+## iOS [3.5.2]
+· Fix aspect ratio issue leading to incomplete fullscreen image display
+· Stability improvements
+
+## tvOS [3.5.2]
+· Allow folders on remote shares to be marked as favorites
+· Add feature to reset the settings to their default values
+· Stability improvements
+
+## iOS [3.5.1]
+· Fix copy/paste/select for the server login screen
+· Minor improvements for the Donation screen
+
 ## iOS [3.5.0]
 · Add new playback history feature
 · Add A to B loop support
@@ -24,6 +182,9 @@
 · Improve accessibility of the playmode buttons
 · Add new Donation screen
 · Add link to newly created Documentation to the Settings screen
+· Update on-boarding screen
+· Fix playback continuation in loop mode for the first item
+· Fix playback of mp3+cdg combinations for karaoke
 
 ## tvOS [3.5.0]
 · Fix the display of media's artworks for audio playback

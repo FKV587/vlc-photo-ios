@@ -11,36 +11,26 @@
  *****************************************************************************/
 
 @objc extension UIDevice {
-    @objc(VLCFreeDiskSpace)
-    var freeDiskSpace: NSNumber {
-        if let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).last {
-            do {
-                let dictionary = try FileManager.default.attributesOfFileSystem(forPath: path)
-                if let totalSpace = dictionary[FileAttributeKey.systemSize] as? Int64,
-                    let totalFreeSpace = dictionary[FileAttributeKey.systemFreeSize] as? Int64 {
-                    let totalSize = ByteCountFormatter.string(fromByteCount: totalSpace, countStyle: .file)
-                    let totalFreeSize = ByteCountFormatter.string(fromByteCount: totalFreeSpace, countStyle: .file)
-                    APLog("Memory Capacity of \(totalSize) with \(totalFreeSize) Free memory available.")
-                    return NSNumber(value: totalFreeSpace)
-                }
-            } catch let error as NSError {
-                APLog("Error Obtaining System Memory Info: Domain = \(error.domain), Code = \(error.code)")
-            }
-        }
-        return 0
-    }
 
     @objc(VLCHasExternalDisplay)
     var hasExternalDisplay: Bool {
+        #if os(iOS)
         if UIScreen.screens.count <= 1 {
             return false
         }
+        #endif
 
-        if #available(iOS 13.0, tvOS 13.0, *) {
+        if #available(iOS 13.0, tvOS 13.0, visionOS 1.0, *) {
             for scene in UIApplication.shared.connectedScenes {
                 if scene.session.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" {
                     return false
                 }
+#if !os(iOS) && !os(tvOS)
+                // visionOS
+                if scene.session.role.rawValue == "UIWindowSceneSessionRoleApplication" {
+                    return false
+                }
+#endif
             }
         }
         return true
@@ -48,11 +38,8 @@
 
     @objc(VLCDeviceHasSafeArea)
     static var hasSafeArea: Bool {
-        if #available(iOS 11.0, *) {
-            let keyWindow = UIApplication.shared.windows.filter {$0.isKeyWindow}.first
-            return keyWindow?.safeAreaInsets.bottom ?? 0 > 0
-        }
-        return false
+        let keyWindow = UIApplication.shared.windows.filter {$0.isKeyWindow}.first
+        return keyWindow?.safeAreaInsets.bottom ?? 0 > 0
     }
 
     static var hasNotch: Bool {

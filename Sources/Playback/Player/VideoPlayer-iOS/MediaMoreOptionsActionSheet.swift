@@ -11,7 +11,7 @@
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
 
-@objc (VLCMediaMoreOptionsActionSheetDelegate)
+@objc(VLCMediaMoreOptionsActionSheetDelegate)
 protocol MediaMoreOptionsActionSheetDelegate {
     func mediaMoreOptionsActionSheetDidToggleInterfaceLock(state: Bool)
     @objc optional func mediaMoreOptionsActionSheetDidAppeared()
@@ -19,6 +19,7 @@ protocol MediaMoreOptionsActionSheetDelegate {
     func mediaMoreOptionsActionSheetHideIcon(for option: OptionsNavigationBarIdentifier)
     func mediaMoreOptionsActionSheetHideAlertIfNecessary()
     func mediaMoreOptionsActionSheetPresentPopupView(withChild child: UIView)
+    func mediaMoreOptionsActionSheetDisplayEqualizerAlert(_ alert: UIAlertController)
     func mediaMoreOptionsActionSheetUpdateProgressBar()
     func mediaMoreOptionsActionSheetGetCurrentMedia() -> VLCMLMedia?
     func mediaMoreOptionsActionSheetDidSelectBookmark(value: Float)
@@ -36,7 +37,7 @@ protocol MediaMoreOptionsActionSheetDelegate {
     @objc optional func mediaMoreOptionsActionSheetShowPlaybackSpeedShortcut(_ displayView: Bool)
 }
 
-@objc (VLCMediaMoreOptionsActionSheet)
+@objc(VLCMediaMoreOptionsActionSheet)
 @objcMembers class MediaMoreOptionsActionSheet: MediaPlayerActionSheet {
 
     // MARK: - Instance variables
@@ -241,6 +242,7 @@ protocol MediaMoreOptionsActionSheetDelegate {
         case .filter:
             openOptionView(videoFiltersView)
         case .playback:
+            playbackSpeedView.setupSliderAndButtons()
             openOptionView(playbackSpeedView)
         case .sleepTimer:
             openOptionView(sleepTimerView)
@@ -344,6 +346,10 @@ extension MediaMoreOptionsActionSheet: EqualizerViewUIDelegate {
 
     func equalizerViewHideIcon() {
         moreOptionsDelegate?.mediaMoreOptionsActionSheetHideIcon(for: .equalizer)
+    }
+
+    func displayAlert(_ alert: UIAlertController) {
+        moreOptionsDelegate?.mediaMoreOptionsActionSheetDisplayEqualizerAlert(alert)
     }
 }
 
@@ -492,7 +498,7 @@ extension MediaMoreOptionsActionSheet: MediaPlayerActionSheetDataSource {
 
             let cellModel = ActionSheetCellModel(
                 title: String(describing: $0),
-                imageIdentifier: $0.rawValue == "bookmarks" ? "chapters" : $0.rawValue,
+                imageIdentifier: $0.rawValue,
                 viewToPresent: selectViewToPresent(for: $0),
                 cellIdentifier: $0
             )

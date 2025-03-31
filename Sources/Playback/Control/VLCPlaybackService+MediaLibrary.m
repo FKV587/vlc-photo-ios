@@ -16,30 +16,48 @@
 #import <VLCMediaLibraryKit/VLCMLMedia.h>
 #import "VLC-Swift.h"
 
+@interface VLCPlaybackService ()
+{
+    BOOL _openInMiniPlayer;
+}
+@end
+
 @implementation VLCPlaybackService (MediaLibrary)
 
 - (void)playMediaAtIndex:(NSInteger)index fromCollection:(NSArray<VLCMLMedia *> *)collection
 {
-    [self configureMediaListWithMLMedia:collection indexToPlay:(int) index];
+    VLCMediaList *list = [self configureMediaListWithMLMedia:collection indexToPlay:(int) index];
+    [self playMediaList:list firstIndex:index subtitlesFilePath:nil];
 }
 
 - (void)playMedia:(VLCMLMedia *)media
 {
-    [self configureMediaListWithMLMedia:@[media] indexToPlay:0];
+    VLCMediaList *list = [self configureMediaListWithMLMedia:@[media] indexToPlay:0];
+    [self playMediaList:list firstIndex:0 subtitlesFilePath:nil];
+}
+
+- (void)playMedia:(VLCMLMedia *)media openInMiniPlayer:(BOOL)openInMiniPlayer
+{
+    _openInMiniPlayer = openInMiniPlayer;
+    [self playMedia:media];
 }
 
 - (void)playMedia:(VLCMLMedia *)media withMode:(EditButtonType)mode
 {
-    if ([self.mediaList count] > 0) {
+    VLCMediaList *list = self.isShuffleMode ? self.shuffledList : self.mediaList;
+    
+    if ([list count] > 0) {
         VLCMedia *vlcmedia = [VLCMedia mediaWithURL:media.mainFile.mrl];
 
         [vlcmedia addOptions:self.mediaOptionsDictionary];
         switch (mode) {
             case EditButtonTypePlayNextInQueue:
                 [self.mediaList insertMedia:vlcmedia atIndex:[self.mediaList indexOfMedia:self.currentlyPlayingMedia] + 1];
+                [self.shuffledList insertMedia:vlcmedia atIndex:[self.shuffledList indexOfMedia:self.currentlyPlayingMedia] + 1];
                 break;
             case EditButtonTypeAppendToQueue:
                 [self.mediaList addMedia:vlcmedia];
+                [self.shuffledList addMedia:vlcmedia];
                 break;
             default:
                 break;
@@ -100,20 +118,17 @@
     [VLCPlaybackService.sharedInstance.playerDisplayController hintPlayqueueWithDelay:0.5];
 }
 
-- (void)configureMediaListWithMLMedia:(NSArray<VLCMLMedia *> *)mlMedia indexToPlay:(int)index {
+- (VLCMediaList *)configureMediaListWithMLMedia:(NSArray<VLCMLMedia *> *)mlMedia indexToPlay:(int)index {
     VLCMediaList *list = [[VLCMediaList alloc] init];
+
     VLCMedia *media;
     for (VLCMLMedia *file in mlMedia) {
         media = [VLCMedia mediaWithURL: file.mainFile.mrl];
         [media addOptions:self.mediaOptionsDictionary];
         [list addMedia:media];
     }
-    [self configureMediaList:list atIndex:index];
-}
 
-- (void)configureMediaList:(VLCMediaList *)list atIndex:(int)index
-{
-    [self playMediaList:list firstIndex:index subtitlesFilePath:nil];
+    return list;
 }
 
 @end

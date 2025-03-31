@@ -17,18 +17,23 @@ NS_ASSUME_NONNULL_BEGIN
 extern NSString *const VLCPlaybackServicePlaybackDidStart;
 extern NSString *const VLCPlaybackServicePlaybackDidPause;
 extern NSString *const VLCPlaybackServicePlaybackDidResume;
+extern NSString *const VLCPlaybackServicePlaybackWillStop;
 extern NSString *const VLCPlaybackServicePlaybackDidStop;
 extern NSString *const VLCPlaybackServicePlaybackDidFail;
 extern NSString *const VLCPlaybackServicePlaybackMetadataDidChange;
 extern NSString *const VLCPlaybackServicePlaybackPositionUpdated;
 extern NSString *const VLCPlaybackServicePlaybackModeUpdated;
+extern NSString *const VLCPlaybackServiceShuffleModeUpdated;
 extern NSString *const VLCPlaybackServicePlaybackDidMoveOnToNextItem;
+extern NSString *const VLCLastPlaylistPlayedMedia;
 
 @class VLCPlaybackService;
 @class VLCMetaData;
 @class VLCMLMedia;
 @class VLCPlayerDisplayController;
 @class VLCPlaybackServiceAdjustFilter;
+@class VLCMediaPlayerTitleDescription;
+@class VLCMediaPlayerChapterDescription;
 
 @protocol VLCPlaybackServiceDelegate <NSObject>
 @optional
@@ -46,6 +51,9 @@ currentMediaHasTrackToChooseFrom:(BOOL)currentMediaHasTrackToChooseFrom
 - (void)playbackService:(VLCPlaybackService *)playbackService
               nextMedia:(VLCMedia *)media;
 - (void)playModeUpdated;
+- (void)reloadPlayQueue;
+- (void)pictureInPictureStateDidChange:(BOOL)isEnabled
+NS_SWIFT_NAME(pictureInPictureStateDidChange(enabled:));
 @end
 
 NS_SWIFT_NAME(PlaybackService)
@@ -54,6 +62,7 @@ NS_SWIFT_NAME(PlaybackService)
 @property (nonatomic, strong, nullable) UIView *videoOutputView;
 
 @property (nonatomic, retain) VLCMediaList *mediaList;
+@property (nonatomic, retain) VLCMediaList *shuffledList;
 
 /* returns nil if currently playing item is not available,*/
 
@@ -65,9 +74,10 @@ NS_SWIFT_NAME(PlaybackService)
 @property (nonatomic, readonly) VLCMetaData *metadata;
 
 @property (nonatomic, readonly) NSInteger mediaDuration;
+@property (nonatomic, readonly) VLCTime *mediaLength;
 @property (nonatomic, readonly) BOOL isPlaying;
 @property (nonatomic, readonly) BOOL playerIsSetup;
-@property (nonatomic, readonly) BOOL playAsAudio;
+@property (nonatomic, readwrite) BOOL playAsAudio;
 @property (nonatomic, readwrite) VLCRepeatMode repeatMode;
 @property (nonatomic, assign, getter=isShuffleMode) BOOL shuffleMode;
 @property (nonatomic, readwrite) float playbackRate; // default = 1.0
@@ -83,7 +93,10 @@ NS_SWIFT_NAME(PlaybackService)
 @property (readonly) NSInteger indexOfCurrentAudioTrack;
 @property (readonly) NSInteger indexOfCurrentSubtitleTrack;
 @property (readonly) NSInteger indexOfCurrentTitle;
+@property (readonly, nullable) VLCMediaPlayerTitleDescription *currentTitleDescription;
 @property (readonly) NSInteger indexOfCurrentChapter;
+@property (readonly, nullable) VLCMediaPlayerChapterDescription *currentChapterDescription;
+@property (readonly) NSInteger numberOfVideoTracks;
 @property (readonly) NSInteger numberOfAudioTracks;
 @property (readonly) NSInteger numberOfVideoSubtitlesIndexes;
 @property (readonly) NSInteger numberOfTitles;
@@ -96,6 +109,8 @@ NS_SWIFT_NAME(PlaybackService)
 @property (readonly) NSNumber *playbackTime;
 @property (nonatomic, readonly) NSDictionary *mediaOptionsDictionary;
 @property (nonatomic, readonly) NSTimer *sleepTimer;
+
+@property (nonatomic, readwrite) CGFloat preAmplification;
 
 #if TARGET_OS_IOS
 @property (nonatomic, nullable) VLCRendererItem *renderer;
@@ -124,8 +139,8 @@ NS_SWIFT_NAME(PlaybackService)
 
 - (NSString *)audioTrackNameAtIndex:(NSInteger)index;
 - (NSString *)videoSubtitleNameAtIndex:(NSInteger)index;
-- (NSDictionary *)titleDescriptionsDictAtIndex:(NSInteger)index;
-- (NSDictionary *)chapterDescriptionsDictAtIndex:(NSInteger)index;
+- (nullable VLCMediaPlayerTitleDescription *)titleDescriptionAtIndex:(NSInteger)index;
+- (nullable VLCMediaPlayerChapterDescription *)chapterDescriptionAtIndex:(NSInteger)index;
 - (void)selectAudioTrackAtIndex:(NSInteger)index;
 - (void)selectVideoSubtitleAtIndex:(NSInteger)index;
 - (void)selectTitleAtIndex:(NSInteger)index;
@@ -136,12 +151,12 @@ NS_SWIFT_NAME(PlaybackService)
 
 - (void)playItemAtIndex:(NSUInteger)index;
 
-#if !TARGET_OS_TV
 - (BOOL)updateViewpoint:(CGFloat)yaw pitch:(CGFloat)pitch roll:(CGFloat)roll fov:(CGFloat)fov absolute:(BOOL)absolute;
 - (NSInteger)currentMediaProjection;
-#endif
+
 - (void)recoverDisplayedMetadata;
 - (void)recoverPlaybackState;
+- (void)disableSubtitlesIfNeeded;
 
 - (BOOL)isPlayingOnExternalScreen;
 
@@ -156,10 +171,15 @@ NS_SWIFT_NAME(PlaybackService)
 - (void)addAudioToCurrentPlaybackFromURL:(NSURL *)audioURL;
 - (void)addSubtitlesToCurrentPlaybackFromURL:(NSURL *)subtitleURL;
 
-- (void)setPlayAsAudio:(BOOL)playAsAudio;
+- (void)setAmplification:(CGFloat)amplification forBand:(unsigned int)index;
+- (void)togglePictureInPicture;
 
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
 - (void)savePlaybackState;
+- (void)restoreAudioAndSubtitleTrack;
+- (BOOL)mediaListContains:(NSURL *)url;
+- (void)removeMediaFromMediaListAtIndex:(NSUInteger)index;
+- (NSIndexPath *)selectedEqualizerProfile;
 #endif
 
 NS_ASSUME_NONNULL_END

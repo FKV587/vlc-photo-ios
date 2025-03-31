@@ -35,6 +35,7 @@ extension Notification.Name {
     let mediaCategorySeparatorColor: UIColor
     let tabBarColor: UIColor
     let orangeUI: UIColor
+    let orangeDarkAccent: UIColor
     let toolBarStyle: UIBarStyle
     let blurStyle: UIBlurEffect.Style
     let textfieldBorderColor: UIColor
@@ -57,6 +58,7 @@ extension Notification.Name {
                 mediaCategorySeparatorColor: UIColor,
                 tabBarColor: UIColor,
                 orangeUI: UIColor,
+                orangeDarkAccent: UIColor,
                 toolBarStyle: UIBarStyle,
                 blurStyle: UIBlurEffect.Style,
                 textfieldBorderColor: UIColor,
@@ -78,6 +80,7 @@ extension Notification.Name {
         self.mediaCategorySeparatorColor = mediaCategorySeparatorColor
         self.tabBarColor = tabBarColor
         self.orangeUI = orangeUI
+        self.orangeDarkAccent = orangeDarkAccent
         self.toolBarStyle = toolBarStyle
         self.blurStyle = blurStyle
         self.textfieldBorderColor = textfieldBorderColor
@@ -109,8 +112,22 @@ enum PresentationThemeType: Int {
     static let darkTheme = PresentationTheme(colors: darkPalette)
     static let blackTheme = PresentationTheme(colors: blackPalette)
 
+    #if os(visionOS)
+    static let visionTheme = PresentationTheme(colors: visionPalette)
+    #endif
+
     var isDark: Bool {
         return colors.isDark
+    }
+
+    var webEquivalentTheme: PresentationTheme {
+        #if os(visionOS)
+        // Since visionOS uses semantic colors for many of these, there will not be equivalent
+        // web hex colors. Fault back to the dark theme
+        return .darkTheme
+        #else
+        return self
+        #endif
     }
 
     var isBlack: Bool {
@@ -147,6 +164,9 @@ enum PresentationThemeType: Int {
     }
 
     static func respectiveTheme(for theme: PresentationThemeType?, excludingBlackTheme: Bool = false) -> PresentationTheme {
+#if os(visionOS)
+        return .visionTheme
+#else
         guard let theme = theme else {
             return PresentationTheme.brightTheme
         }
@@ -163,12 +183,17 @@ enum PresentationThemeType: Int {
         if theme == .dark {
             presentationTheme = darkTheme
         } else if theme == .auto {
+#if os(iOS)
             if #available(iOS 13.0, *) {
                 let isSystemDarkTheme = UIScreen.main.traitCollection.userInterfaceStyle == .dark
                 presentationTheme = isSystemDarkTheme ? darkTheme : PresentationTheme.brightTheme
             }
+#else
+            presentationTheme = darkTheme
+#endif // os(iOS)
         }
         return presentationTheme
+#endif // os(visionOS)
     }
 
     let colors: ColorPalette
@@ -181,7 +206,7 @@ enum PresentationThemeType: Int {
         let r = CGFloat((rgbValue & 0xFF0000) >> 16) / 255.0
         let g = CGFloat((rgbValue & 0xFF00) >> 8) / 255.0
         let b = CGFloat(rgbValue & 0xFF) / 255.0
-        self.init(red: r, green: g, blue: b, alpha: 1.0)
+        self.init(red: r, green: g, blue: b, alpha: alpha)
     }
 
     private func toHex(alpha: Bool = false) -> String? {
@@ -226,6 +251,7 @@ let brightPalette = ColorPalette(isDark: false,
                                  mediaCategorySeparatorColor: UIColor(0xECF2F6),
                                  tabBarColor: UIColor(0xFFFFFF),
                                  orangeUI: UIColor(0xFF8800),
+                                 orangeDarkAccent: UIColor(0xFF8800),
                                  toolBarStyle: UIBarStyle.default,
                                  blurStyle: .extraLight,
                                  textfieldBorderColor: UIColor(0x84929C),
@@ -248,6 +274,7 @@ let darkPalette = ColorPalette(isDark: true,
                                mediaCategorySeparatorColor: UIColor(0x25292C),
                                tabBarColor: UIColor(0x25292C),
                                orangeUI: UIColor(0xFF8800),
+                               orangeDarkAccent: UIColor(0xD57200),
                                toolBarStyle: UIBarStyle.black,
                                blurStyle: .dark,
                                textfieldBorderColor: UIColor(0x84929C),
@@ -270,11 +297,37 @@ let blackPalette = ColorPalette(isDark: true,
                                 mediaCategorySeparatorColor: UIColor(0x25292C),
                                 tabBarColor: UIColor(0x000000),
                                 orangeUI: UIColor(0xFF8800),
+                                orangeDarkAccent: UIColor(0xD57200),
                                 toolBarStyle: UIBarStyle.black,
                                 blurStyle: .dark,
                                 textfieldBorderColor: UIColor(0x84929C),
                                 textfieldPlaceholderColor: UIColor(0x737373),
                                 thumbnailBackgroundColor: UIColor(0x1C1E21))
+
+#if os(visionOS)
+let visionPalette = ColorPalette(isDark: true,
+                                 name: "visionOS",
+                                 statusBarStyle: .lightContent,
+                                 navigationbarColor: .clear,
+                                 navigationbarTextColor: .label,
+                                 background: .clear,
+                                 cellBackgroundA: .clear,
+                                 cellBackgroundB: UIColor(0x494B4D, 0.2),
+                                 cellDetailTextColor: .tertiaryLabel,
+                                 cellTextColor: .label,
+                                 lightTextColor: .secondaryLabel,
+                                 sectionHeaderTextColor: .secondaryLabel,
+                                 separatorColor: .tertiarySystemFill,
+                                 mediaCategorySeparatorColor: .tertiarySystemFill,
+                                 tabBarColor: .clear,
+                                 orangeUI: UIColor(0xFF8800),
+                                 orangeDarkAccent: UIColor(0xD57200),
+                                 toolBarStyle: UIBarStyle.black,
+                                 blurStyle: .dark,
+                                 textfieldBorderColor: UIColor(0x84929C),
+                                 textfieldPlaceholderColor: UIColor(0x737373),
+                                 thumbnailBackgroundColor: UIColor(0x1C1E21))
+#endif
 
 let defaultFont = Typography(tableHeaderFont: UIFont.systemFont(ofSize: 24, weight: .semibold))
 

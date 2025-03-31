@@ -25,6 +25,7 @@
 "SETTINGS_PASSCODE_LOCK" = "Passcode Lock";
 "SETTINGS_PASSCODE_LOCK_ALLOWTOUCHID" = "Allow Touch ID for unlock";
 "SETTINGS_PASSCODE_LOCK_ALLOWFACEID" = "Allow Face ID for unlock";
+"SETTINGS_PASSCODE_LOCK_ALLOWOPTICID" = "Allow Optic ID for unlock";
 "SETTINGS_HIDE_LIBRARY_IN_FILES_APP" = "Hide the media library in Files";
 "SETTINGS_VIDEO_FULLSCREEN" = "Play video in fullscreen";
 "SETTINGS_HIDE_UI_DURING_PLAYBACK" = "Hide user interface during playback";
@@ -39,6 +40,7 @@
 "SETTINGS_PLAY_ALL" = "Seamless playback for collections";
 "SETTINGS_PLAYLIST_PLAY_ALL" = "Seamless playback for playlists";
 "SETTINGS_ENABLE_MEDIA_CELL_TEXT_SCROLLING" = "Enable text scrolling in media list";
+"SETTINGS_RESTORE_LAST_PLAYED_MEDIA" = "Restore last played media on launch";
 
 "SETTINGS_SKIP_LOOP_FILTER" = "Deblocking filter";
 "SETTINGS_SKIP_LOOP_FILTER_INFO" = "Skipping the loop filter (aka deblocking) usually has a detrimental effect on quality. However it provides a big speedup for high definition streams.";
@@ -56,7 +58,10 @@
 "SETTINGS_GESTURES_CLOSE" = "Pinch to close";
 "SETTINGS_GESTURES_FORWARD_BACKWARD_EQUAL" = "Use the same interval to seek forward and backwards";
 "SETTINGS_GESTURES_TAP_SWIPE_EQUAL" = "Use the same interval for tap and swipe gestures";
+
 "SETTINGS_SUBTITLES_TITLE" = "Subtitles";
+"SETTINGS_SUBTITLES_DISABLE" = "Disable subtitles";
+"SETTINGS_SUBTITLES_DISABLE_LONG" = "Disable the automatic selection of subtitles";
 "SETTINGS_SUBTITLES_FONT" = "Font";
 "SETTINGS_SUBTITLES_TEXT_ENCODING" = "Text encoding";
 "SETTINGS_SUBTITLES_FONTSIZE" = "Relative font size";
@@ -93,6 +98,7 @@
 "SETTINGS_HWDECODING_INFO" = "Content encoded in the H.264 and H.265 formats can be decoded in hardware leading to a significant improvement of battery life and performance. Be careful when disabling this option.";
 "SETTINGS_HWDECODING_ON" = "On";
 "SETTINGS_HWDECODING_OFF" = "Off";
+"SETTINGS_LOCK_ROTATION" = "Force the rotation lock";
 "SETTINGS_CASTING" = "Casting";
 "SETTINGS_PTCASTING" = "Audio passthrough";
 "SETTINGS_PTCASTINGLONG" = "Let your TV manage audio rendering";
@@ -144,11 +150,24 @@
 "SETTINGS_PLAYBACK_SKIP_BACKWARD_TAP" = "Backward skip on tap";
 "SETTINGS_PLAYBACK_SKIP_FORWARD_SWIPE" = "Forward skip on swipe";
 "SETTINGS_PLAYBACK_SKIP_BACKWARD_SWIPE" = "Backward skip on swipe";
+"SETINGS_LONG_TOUCH_SPEED_UP" = "Long touch to speed-up";
+"SETTINGS_PLAYBACK_LOCKSCREEN_SKIP" = "Lock screen controls";
+"SETTINGS_PLAYBACK_EXTERNAL_CONTROLS_SKIP" = "External controls (headphones, car)";
+"SETTINGS_PLAYBACK_CONTROLS_SKIP_NO" = "Next/Previous";
+"SETTINGS_PLAYBACK_CONTROLS_SKIP_YES" = "Skip Forward/Back";
 
+"SETTINGS_DURATION_FOUR" = "4 seconds";
 "SETTINGS_DURATION_FIVE" = "5 seconds";
 "SETTINGS_DURATION_TEN" =  "10 seconds";
 "SETTINGS_DURATION_FIFTEEN" = "15 seconds";
+"SETTINGS_DURATION_TWENTY" =  "20 seconds";
 "SETTINGS_DURATION_THIRTY" =  "30 seconds";
 "SETTINGS_DURATION_SIXTY" = "60 seconds";
 
+"SETTINGS_ACCESSIBILITY" = "Accessibility";
+"SETTINGS_PLAYER_CONTROL_DURATION" = "Hide playback controls after";
+
+"SETTINGS_PAUSE_WHEN_SHOWING_CONTROLS" = "Pause playback when showing controls";
+
 "SETTINGS_RESET" = "Reset the settings";
+"SETTINGS_RESET_TITLE" = "Reset";

@@ -16,7 +16,9 @@ import Foundation
 class MediaViewController: VLCPagingViewController<VLCLabelCell> {
 
     var mediaLibraryService: MediaLibraryService
+    #if os(iOS)
     private var rendererButton: UIButton
+    #endif
     private(set) lazy var sortButton: UIBarButtonItem = {
         let sortButton = setupSortbutton()
 
@@ -84,7 +86,9 @@ class MediaViewController: VLCPagingViewController<VLCLabelCell> {
 
     init(mediaLibraryService: MediaLibraryService) {
         self.mediaLibraryService = mediaLibraryService
+        #if os(iOS)
         rendererButton = VLCAppCoordinator.sharedInstance().rendererDiscovererManager.setupRendererButton()
+        #endif
         super.init(nibName: nil, bundle: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(updateTheme), name: .VLCThemeDidChangeNotification, object: nil)
     }
@@ -103,9 +107,11 @@ class MediaViewController: VLCPagingViewController<VLCLabelCell> {
             leftBarButtons = [sortButton, historyButton]
         }
 
+#if os(iOS)
         if !rendererButton.isHidden {
             rightBarButtons?.append(UIBarButtonItem(customView: rendererButton))
         }
+#endif
 
         viewControllers.forEach {
             ($0 as? MediaCategoryViewController)?.delegate = self
@@ -124,15 +130,15 @@ class MediaViewController: VLCPagingViewController<VLCLabelCell> {
     }
 
     private func setupNavigationBar() {
-        if #available(iOS 11.0, *) {
-            navigationController?.navigationBar.prefersLargeTitles = false
-        }
+        navigationController?.navigationBar.prefersLargeTitles = false
         if #available(iOS 13.0, *) {
             navigationController?.navigationBar.standardAppearance = AppearanceManager.navigationbarAppearance()
             navigationController?.navigationBar.scrollEdgeAppearance = AppearanceManager.navigationbarAppearance()
         }
         navigationController?.navigationBar.isTranslucent = false
+        #if os(iOS)
         setNeedsStatusBarAppearanceUpdate()
+        #endif
         updateButtonsFor(viewControllers[currentIndex])
     }
 
@@ -213,9 +219,11 @@ class MediaViewController: VLCPagingViewController<VLCLabelCell> {
             rightBarButtonItems = [menuButton]
         }
 
+#if os(iOS)
         if !rendererButton.isHidden {
             rightBarButtonItems.append(UIBarButtonItem(customView: rendererButton))
         }
+#endif
 
         return rightBarButtonItems
     }
@@ -271,9 +279,11 @@ extension MediaViewController: MediaCategoryViewControllerDelegate {
             rightBarButtons = isEditing ? [doneButton] : [editButton]
         }
 
+#if os(iOS)
         if !rendererButton.isHidden {
             rightBarButtons?.append(UIBarButtonItem(customView: rendererButton))
         }
+#endif
 
         viewController.navigationItem.rightBarButtonItems = rightBarButtons
         viewController.navigationItem.leftBarButtonItems = leftBarButtons
@@ -299,7 +309,7 @@ extension MediaViewController {
             rightButtons = [editButton]
         } else if viewControllers[currentIndex] is ArtistAlbumCategoryViewController ||
                     viewControllers[currentIndex] is CollectionCategoryViewController {
-            leftBarButtons = nil
+            leftBarButtons = isEditing ? [selectAllButton] : nil
             rightButtons = [editButton, sortButton]
         } else {
             leftBarButtons = isEditing ? [selectAllButton] : [sortButton, historyButton]
@@ -314,9 +324,11 @@ extension MediaViewController {
             }
         }
 
+#if os(iOS)
         if !rendererButton.isHidden {
             rightButtons.append(UIBarButtonItem(customView: rendererButton))
         }
+#endif
 
         // Check if the playAllButton should be displayed
         if navigationController?.viewControllers.last is ArtistViewController,
@@ -406,8 +418,8 @@ extension MediaViewController {
                                   image: UIImage(systemName: "square.grid.2x2"),
                                   state: isGridLayout ? .on : .off,
                                   handler: {
-            [unowned self] _ in
-            mediaCategoryViewController.handleLayoutChange(gridLayout: true)
+            [unowned self, weak mediaCategoryViewController] _ in
+            mediaCategoryViewController?.handleLayoutChange(gridLayout: true)
             menuButton.menu = generateMenu(viewController: mediaCategoryViewController)
         })
 
@@ -415,8 +427,8 @@ extension MediaViewController {
                                   image: UIImage(systemName: "list.bullet"),
                                   state: isGridLayout ? .off : .on,
                                   handler: {
-            [unowned self] _ in
-            mediaCategoryViewController.handleLayoutChange(gridLayout: false)
+            [unowned self, weak mediaCategoryViewController] _ in
+            mediaCategoryViewController?.handleLayoutChange(gridLayout: false)
             menuButton.menu = generateMenu(viewController: mediaCategoryViewController)
         })
 
@@ -440,15 +452,19 @@ extension MediaViewController {
         for (index, criterion) in sortModel.sortingCriteria.enumerated() {
             let currentSort: Bool = index == currentSortIndex
             let chevronImageName: String = sortModel.desc ? "chevron.down" : "chevron.up"
-            let actionImage: UIImage? = currentSort ?
-            UIImage(systemName: chevronImageName) : nil
+            var actionImage: UIImage? = currentSort ? UIImage(systemName: chevronImageName) : nil
+
+            // There is no need to display the desc image since it has no impact
+            if criterion == VLCMLSortingCriteria.default {
+                actionImage = nil
+            }
 
             let action = UIAction(title: String(describing: criterion),
                                   image: actionImage,
                                   state: currentSort ? .on : .off,
                                   handler: {
-                [unowned self] _ in
-                mediaCategoryViewController.executeSortAction(with: criterion,
+                [unowned self, weak mediaCategoryViewController] _ in
+                mediaCategoryViewController?.executeSortAction(with: criterion,
                                                               desc: !sortModel.desc)
                 menuButton.menu = generateMenu(viewController: mediaCategoryViewController)
             })
@@ -481,8 +497,8 @@ extension MediaViewController {
     @available(iOS 14.0, *)
     func generateHistoryMenu() -> UIMenu {
         let historyAction = UIAction(title: NSLocalizedString("BUTTON_HISTORY", comment: ""),
-                                     image: UIImage(systemName: "clock.arrow.2.circlepath")) { _ in
-            self.handleHistory()
+                                     image: UIImage(systemName: "clock.arrow.2.circlepath")) { [weak self] _ in
+            self?.handleHistory()
         }
 
         historyAction.accessibilityLabel = NSLocalizedString("BUTTON_HISTORY", comment: "")
@@ -501,11 +517,6 @@ extension MediaViewController {
 
         var rightMenuItems: [UIMenuElement] = [selectAction]
 
-        if let model = mediaCategoryViewController.model as? CollectionModel,
-           model.mediaCollection is VLCMLPlaylist {
-            return UIMenu(options: .displayInline, children: rightMenuItems)
-        }
-
         if let parentViewController = viewController?.parent,
            parentViewController is VideoViewController || parentViewController is AudioViewController {
             let historyMenu = generateHistoryMenu()
@@ -514,6 +525,12 @@ extension MediaViewController {
 
         let layoutSubMenu = generateLayoutMenu(with: mediaCategoryViewController)
         let sortSubMenu = generateSortMenu(with: mediaCategoryViewController)
+
+        if let model = mediaCategoryViewController.model as? CollectionModel,
+           model.mediaCollection is VLCMLPlaylist {
+            rightMenuItems.append(sortSubMenu)
+            return UIMenu(options: .displayInline, children: rightMenuItems)
+        }
 
         rightMenuItems.append(layoutSubMenu)
         rightMenuItems.append(sortSubMenu)
@@ -525,8 +542,8 @@ extension MediaViewController {
             let includeAllArtist = UIAction(title: NSLocalizedString("HIDE_FEAT_ARTISTS", comment: ""),
                                             image: UIImage(systemName: "person.3"),
                                             state: isIncludeAllArtistActive ? .on : .off,
-                                            handler: { _ in
-                mediaCategoryViewController.actionSheetSortSectionHeaderShouldHideFeatArtists(onSwitchIsOnChange: !isIncludeAllArtistActive)
+                                            handler: { [weak mediaCategoryViewController] _ in
+                mediaCategoryViewController?.actionSheetSortSectionHeaderShouldHideFeatArtists(onSwitchIsOnChange: !isIncludeAllArtistActive)
             })
 
             additionalMenuItems.append(includeAllArtist)
@@ -536,8 +553,8 @@ extension MediaViewController {
             let hideTrackNumbers = UserDefaults.standard.bool(forKey: kVLCAudioLibraryHideTrackNumbers)
             let hideTrackNumbersAction = UIAction(title: NSLocalizedString("HIDE_TRACK_NUMBERS", comment: ""),
                                                      state: hideTrackNumbers ? .on : .off,
-                                                     handler: { _ in
-                mediaCategoryViewController.actionSheetSortSectionHeaderShouldHideTrackNumbers(onSwitchIsOnChange: !hideTrackNumbers)
+                                                     handler: { [weak mediaCategoryViewController] _ in
+                mediaCategoryViewController?.actionSheetSortSectionHeaderShouldHideTrackNumbers(onSwitchIsOnChange: !hideTrackNumbers)
             })
 
             additionalMenuItems.append(hideTrackNumbersAction)

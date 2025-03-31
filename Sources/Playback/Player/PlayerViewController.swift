@@ -21,8 +21,10 @@ enum PlayerSeekState {
 
 enum PlayerPanType {
     case none
+#if os(iOS)
     case brightness
     case volume
+#endif
     case projection
 }
 
@@ -71,7 +73,9 @@ class PlayerViewController: UIViewController {
 
     // MARK: - Properties
     var mediaLibraryService: MediaLibraryService
+#if os(iOS)
     var rendererDiscovererManager: VLCRendererDiscovererManager
+#endif
     var playerController: PlayerController
     var playbackService: PlaybackService = PlaybackService.sharedInstance()
     var queueViewController: QueueViewController?
@@ -99,12 +103,15 @@ class PlayerViewController: UIViewController {
     }()
 
     lazy var mediaNavigationBar: MediaNavigationBar = {
+#if os(iOS)
         var mediaNavigationBar = MediaNavigationBar(frame: .zero,
                                                     rendererDiscovererService: rendererDiscovererManager)
+        mediaNavigationBar.chromeCastButton.isHidden = self.playbackService.renderer == nil
+#else
+        var mediaNavigationBar = MediaNavigationBar(frame: .zero)
+#endif
         mediaNavigationBar.delegate = self
         mediaNavigationBar.presentingViewController = self
-        mediaNavigationBar.chromeCastButton.isHidden =
-            self.playbackService.renderer == nil
         return mediaNavigationBar
     }()
 
@@ -158,20 +165,18 @@ class PlayerViewController: UIViewController {
         contentOutputView.backgroundColor = .clear
         contentOutputView.isUserInteractionEnabled = false
         contentOutputView.translatesAutoresizingMaskIntoConstraints = false
-
-        if #available(iOS 11.0, *) {
-            contentOutputView.accessibilityIgnoresInvertColors = true
-        }
+        contentOutputView.accessibilityIgnoresInvertColors = true
 
         contentOutputView.accessibilityIdentifier = "Video Player Title"
         contentOutputView.accessibilityLabel = NSLocalizedString("VO_VIDEOPLAYER_TITLE",
-                                                               comment: "")
+                                                                 comment: "")
         contentOutputView.accessibilityHint = NSLocalizedString("VO_VIDEOPLAYER_DOUBLETAP",
-                                                              comment: "")
+                                                                comment: "")
         return contentOutputView
     }()
 
-    private lazy var brightnessControl: SliderGestureControl = {
+#if os(iOS)
+    lazy var brightnessControl: SliderGestureControl = {
         return SliderGestureControl { value in
             UIScreen.main.brightness = CGFloat(value)
         } deviceGetter: {
@@ -179,7 +184,7 @@ class PlayerViewController: UIViewController {
         }
     }()
 
-    private lazy var volumeControl: SliderGestureControl = {
+    lazy var volumeControl: SliderGestureControl = {
         return SliderGestureControl { [weak self] value in
             self?.volumeView.setVolume(value)
         } deviceGetter: {
@@ -187,10 +192,10 @@ class PlayerViewController: UIViewController {
         }
     }()
 
-    private lazy var volumeBackgroundGradientLayer: CAGradientLayer = {
+    lazy var volumeBackgroundGradientLayer: CAGradientLayer = {
         let volumeBackGroundGradientLayer = CAGradientLayer()
 
-        volumeBackGroundGradientLayer.frame = UIScreen.main.bounds
+        volumeBackGroundGradientLayer.frame = self.view.bounds
         volumeBackGroundGradientLayer.colors = [UIColor.clear.cgColor,
                                                 UIColor.clear.cgColor,
                                                 UIColor.clear.cgColor,
@@ -201,10 +206,10 @@ class PlayerViewController: UIViewController {
         return volumeBackGroundGradientLayer
     }()
 
-    private lazy var brightnessBackgroundGradientLayer: CAGradientLayer = {
+    lazy var brightnessBackgroundGradientLayer: CAGradientLayer = {
         let brightnessGroundGradientLayer = CAGradientLayer()
 
-        brightnessGroundGradientLayer.frame = UIScreen.main.bounds
+        brightnessGroundGradientLayer.frame = self.view.bounds
         brightnessGroundGradientLayer.colors = [UIColor.clear.cgColor,
                                                 UIColor.clear.cgColor,
                                                 UIColor.clear.cgColor,
@@ -217,7 +222,7 @@ class PlayerViewController: UIViewController {
 
     lazy var sideBackgroundGradientView: UIView = {
         let backgroundGradientView = UIView()
-        backgroundGradientView.frame = UIScreen.main.bounds
+        backgroundGradientView.frame = self.view.bounds
         backgroundGradientView.autoresizingMask = [.flexibleHeight, .flexibleWidth]
 
         backgroundGradientView.layer.addSublayer(brightnessBackgroundGradientLayer)
@@ -240,7 +245,9 @@ class PlayerViewController: UIViewController {
         vc.alpha = 0
         return vc
     }()
+#endif
 
+#if os(iOS)
     lazy var rendererButton: UIButton = {
         let rendererButton = rendererDiscovererManager.setupRendererButton()
         rendererButton.tintColor = .white
@@ -265,8 +272,11 @@ class PlayerViewController: UIViewController {
 
         return rendererButton
     }()
+#endif
 
+#if os(iOS)
     let volumeView = MPVolumeView(frame: .zero)
+#endif
 
     var addBookmarksView: AddBookmarksView? = nil
 
@@ -280,7 +290,7 @@ class PlayerViewController: UIViewController {
 
     private var fov: CGFloat = 0
 
-    private var viewTranslation: CGPoint = CGPoint(x: 0, y: 0)
+    private var minimizationInitialCenter: CGPoint?
 
     private lazy var deviceMotion: DeviceMotion = {
         let deviceMotion = DeviceMotion()
@@ -288,12 +298,24 @@ class PlayerViewController: UIViewController {
         return deviceMotion
     }()
 
+    var systemBrightness: Double?
+
     // MARK: Constants
     private let ZOOM_SENSITIVITY: CGFloat = 5
 
+#if os(iOS)
     private let screenPixelSize = CGSize(width: UIScreen.main.bounds.width,
                                          height: UIScreen.main.bounds.height)
-    
+#else
+    private let screenPixelSize: CGSize = {
+        return UIApplication.shared.delegate?.window??.bounds.size
+    }()!
+#endif
+
+    private let notificationCenter = NotificationCenter.default
+
+    private let userDefaults = UserDefaults.standard
+
     // MARK: - Gestures
 
     lazy var panRecognizer: UIPanGestureRecognizer = {
@@ -345,6 +367,7 @@ class PlayerViewController: UIViewController {
 
     // MARK: - Init
 
+#if os(iOS)
     @objc init(mediaLibraryService: MediaLibraryService, rendererDiscovererManager: VLCRendererDiscovererManager, playerController: PlayerController) {
         self.mediaLibraryService = mediaLibraryService
         self.rendererDiscovererManager = rendererDiscovererManager
@@ -352,19 +375,30 @@ class PlayerViewController: UIViewController {
         super.init(nibName: nil, bundle: nil)
         mediaNavigationBar.chromeCastButton = rendererButton
         mediaNavigationBar.addGestureRecognizer(minimizeGestureRecognizer)
+        systemBrightness = UIScreen.main.brightness
     }
+#else
+    @objc init(mediaLibraryService: MediaLibraryService, playerController: PlayerController) {
+        self.mediaLibraryService = mediaLibraryService
+        self.playerController = playerController
+        super.init(nibName: nil, bundle: nil)
+        mediaNavigationBar.addGestureRecognizer(minimizeGestureRecognizer)
+    }
+#endif
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
     override func viewDidLoad() {
         setupObservers()
         hideSystemVolumeInfo()
     }
 
     override func viewWillAppear(_ animated: Bool) {
+#if os(iOS)
         setupRendererDiscovererManager()
+#endif
 
         var color: UIColor = .white
         var image: UIImage? = UIImage(named: "renderer")
@@ -384,7 +418,33 @@ class PlayerViewController: UIViewController {
         }
 
         view.transform = .identity
+
+#if os(iOS)
+        //update the system brightness value before player appears
+        self.systemBrightness = UIScreen.main.brightness
+
+        //update the value of brightness control view
+        //In case of remember brightness option is disabled, this will update the brightness bar with current brightness.
+        if !playerController.isRememberBrightnessEnabled && self is VideoPlayerViewController {
+            brightnessControlView.updateIcon(level: brightnessControl.fetchAndGetDeviceValue())
+        }
+#endif
     }
+
+#if os(iOS)
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+
+        if playerController.isRememberBrightnessEnabled && self is VideoPlayerViewController {
+            if let brightness = userDefaults.value(forKey: KVLCPlayerBrightness) as? CGFloat {
+                animateBrightness(to: brightness)
+                self.brightnessControl.value = Float(brightness)
+            }
+        }
+
+        addPlayerBrightnessObservers()
+    }
+#endif
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
@@ -392,6 +452,25 @@ class PlayerViewController: UIViewController {
         // Adjust the position of the AB Repeat marks if needed based on the device's orientation.
         mediaScrubProgressBar.adjustABRepeatMarks(aMark: aMark, bMark: bMark)
     }
+
+#if os(iOS)
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+
+        if playerController.isRememberBrightnessEnabled && self is VideoPlayerViewController {
+            let currentBrightness = UIScreen.main.brightness
+            self.brightnessControl.value = Float(currentBrightness) // helper in indicating change in the system brightness
+            userDefaults.set(currentBrightness, forKey: KVLCPlayerBrightness)
+        }
+        //set the value of system brightness after closing the app
+        //even if the Player Should Remember Brightness option is disabled
+        animateBrightness(to: systemBrightness!, duration: 0.35)
+
+        // remove the observer when the view disappears to avoid breaking the brightness view value
+        // when the player is not shown to save the persisted values
+        removePlayerBrightnessObservers()
+    }
+#endif
 
     // MARK: - Public methods
 
@@ -426,14 +505,15 @@ class PlayerViewController: UIViewController {
         rightSwipeRecognizer.isEnabled = !disable
         doubleTapGestureRecognizer.isEnabled = !disable
     }
-    
+
+#if os(iOS)
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         // We're observing outputVolume to handle volume changes from physical volume buttons
         // To processd properly we have to check we're not interacting with UI controls or gesture
         if  keyPath == "outputVolume" &&
-            !volumeControlView.isBeingTouched && // Check we're not interacting with volume slider
-            !isGestureActive && // Check if the slider did not just changed value
-            currentPanType != .volume { // Check we're not doing pan gestures for volume
+                !volumeControlView.isBeingTouched && // Check we're not interacting with volume slider
+                !isGestureActive && // Check if the slider did not just changed value
+                currentPanType != .volume { // Check we're not doing pan gestures for volume
             let appearAnimations = { [volumeControlView] in
                 volumeControlView.alpha = 1
             }
@@ -449,6 +529,7 @@ class PlayerViewController: UIViewController {
             self.volumeControlView.updateIcon(level: AVAudioSession.sharedInstance().outputVolume)
         }
     }
+#endif
 
     func changeOutputView(to output: UIView?) {
         // Change the content output view if necessary according to the type of the player.
@@ -466,30 +547,8 @@ class PlayerViewController: UIViewController {
         playbackService.toggleRepeatMode()
     }
 
-    // MARK: - Private methods
-
-    private func jumpBackwards(_ interval: Int = 10) {
-        playbackService.jumpBackward(Int32(interval))
-    }
-
-    private func jumpForwards(_ interval: Int = 10) {
-        playbackService.jumpForward(Int32(interval))
-    }
-
-    private func executeSeekFromGesture(_ type: PlayerSeekGestureType) {
-        var hudString: String = ""
-
-        let currentSeek: Int
-        if numberOfGestureSeek > 0 {
-            currentSeek = type == .tap ? seekForwardBy : seekForwardBySwipe
-            totalSeekDuration = previousSeekState == .backward ? currentSeek : totalSeekDuration + currentSeek
-            previousSeekState = .forward
-        } else {
-            currentSeek = type == .tap ? seekBackwardBy : seekBackwardBySwipe
-            totalSeekDuration = previousSeekState == .forward ? -currentSeek : totalSeekDuration - currentSeek
-            previousSeekState = .backward
-        }
-
+    func displayAndApplySeekDuration(_ currentSeek: Int) {
+        var hudString: String
         if totalSeekDuration > 0 {
             hudString = "⇒ "
             jumpForwards(currentSeek)
@@ -502,6 +561,40 @@ class PlayerViewController: UIViewController {
         let duration: VLCTime = VLCTime(number: NSNumber(value: abs(totalSeekDuration) * 1000))
         hudString.append(duration.stringValue)
         statusLabel.showStatusMessage(hudString)
+    }
+
+    func togglePlayPause() {
+        if playbackService.isPlaying {
+            playbackService.pause()
+            setControlsHidden(false, animated: playerController.isControlsHidden)
+        } else {
+            playbackService.play()
+        }
+    }
+
+    // MARK: - Private methods
+
+    private func jumpBackwards(_ interval: Int = 10) {
+        playbackService.jumpBackward(Int32(interval))
+    }
+
+    private func jumpForwards(_ interval: Int = 10) {
+        playbackService.jumpForward(Int32(interval))
+    }
+
+    private func executeSeekFromGesture(_ type: PlayerSeekGestureType) {
+        let currentSeek: Int
+        if numberOfGestureSeek > 0 {
+            currentSeek = type == .tap ? seekForwardBy : seekForwardBySwipe
+            totalSeekDuration = previousSeekState == .backward ? currentSeek : totalSeekDuration + currentSeek
+            previousSeekState = .forward
+        } else {
+            currentSeek = type == .tap ? seekBackwardBy : seekBackwardBySwipe
+            totalSeekDuration = previousSeekState == .forward ? -currentSeek : totalSeekDuration - currentSeek
+            previousSeekState = .backward
+        }
+
+        displayAndApplySeekDuration(currentSeek)
     }
 
     private func showIcon(button: UIButton) {
@@ -568,20 +661,25 @@ class PlayerViewController: UIViewController {
     }
 
     private func detectPanType(_ recognizer: UIPanGestureRecognizer) -> PlayerPanType {
-        let window: UIWindow = UIApplication.shared.keyWindow!
+        let window: UIWindow = (UIApplication.shared.delegate?.window!)!
         let windowWidth: CGFloat = window.bounds.width
         let location: CGPoint = recognizer.location(in: window)
 
+        // If minimization handler not ended yet, don't detect other gestures to don't block it.
+        guard minimizationInitialCenter == nil else { return .none }
+
         var panType: PlayerPanType = .none
-        if location.x < 3 * windowWidth / 3 && playerController.isVolumeGestureEnabled {
-            panType = .volume
-        }
         if location.x < 2 * windowWidth / 3 {
             panType = .none
         }
+#if os(iOS)
         if location.x < 1 * windowWidth / 3 && playerController.isBrightnessGestureEnabled {
-             panType = .brightness
+            panType = .brightness
         }
+        if location.x < 3 * windowWidth / 3 && playerController.isVolumeGestureEnabled {
+            panType = .volume
+        }
+#endif
 
         if playbackService.currentMediaIs360Video {
             panType = .projection
@@ -615,19 +713,26 @@ class PlayerViewController: UIViewController {
         applyYaw(yaw: diffYaw, pitch: diffPitch)
     }
 
+#if os(iOS)
     private func setupRendererDiscovererManager() {
         rendererDiscovererManager.presentingViewController = self
         rendererDiscovererManager.delegate = self
     }
-    
+#endif
+
     private func hideSystemVolumeInfo() {
+#if os(iOS)
         volumeView.alpha = 0.00001
         view.addSubview(volumeView)
+#endif
     }
-    
+
     private func setupObservers() {
         try? AVAudioSession.sharedInstance().setActive(true)
         AVAudioSession.sharedInstance().addObserver(self, forKeyPath: "outputVolume", options: NSKeyValueObservingOptions.new, context: nil)
+
+        notificationCenter.addObserver(self, selector: #selector(updatePlayerControls), name: .VLCDidAppendMediaToQueue, object: nil)
+        notificationCenter.addObserver(self, selector: #selector(updatePlayerControls), name: .VLCDidRemoveMediaFromQueue, object: nil)
     }
 
     private func setupSeekDurations() {
@@ -654,6 +759,104 @@ class PlayerViewController: UIViewController {
         }
     }
 
+    private func applyCustomEqualizerProfileIfNeeded() {
+        let userDefaults = UserDefaults.standard
+        guard userDefaults.bool(forKey: kVLCCustomProfileEnabled) else {
+            return
+        }
+
+        let profileIndex = userDefaults.integer(forKey: kVLCSettingEqualizerProfile)
+        let encodedData = userDefaults.data(forKey: kVLCCustomEqualizerProfiles)
+
+        guard let encodedData = encodedData,
+              let customProfiles = NSKeyedUnarchiver(forReadingWith: encodedData).decodeObject(forKey: "root") as? CustomEqualizerProfiles,
+              profileIndex < customProfiles.profiles.count else {
+            return
+        }
+
+        let selectedProfile = customProfiles.profiles[profileIndex]
+        playbackService.preAmplification = CGFloat(selectedProfile.preAmpLevel)
+
+        for (index, frequency) in selectedProfile.frequencies.enumerated() {
+            playbackService.setAmplification(CGFloat(frequency), forBand: UInt32(index))
+        }
+    }
+
+    // MARK: - Observers
+
+#if os(iOS)
+    private func addPlayerBrightnessObservers() {
+        notificationCenter.addObserver(self,
+                                       selector: #selector(systemBrightnessChanged),
+                                       name: UIApplication.didBecomeActiveNotification,
+                                       object: nil)
+
+        notificationCenter.addObserver(self,
+                                       selector: #selector(playerWillResignActive),
+                                       name: UIApplication.willResignActiveNotification,
+                                       object: nil)
+
+        notificationCenter.addObserver(self,
+                                       selector: #selector(playerWillEnterForeground),
+                                       name: UIApplication.willEnterForegroundNotification,
+                                       object: nil)
+    }
+
+    private func removePlayerBrightnessObservers() {
+        notificationCenter.removeObserver(self,
+                                          name: UIApplication.didBecomeActiveNotification,
+                                          object: nil)
+
+        notificationCenter.removeObserver(self,
+                                          name: UIApplication.willResignActiveNotification,
+                                          object: nil)
+
+        notificationCenter.removeObserver(self,
+                                          name: UIApplication.willEnterForegroundNotification,
+                                          object: nil
+        )
+    }
+
+    func animateBrightness(to value: CGFloat, duration: CGFloat = 0.3) {
+        UIScreen.main.animateBrightnessChange(to: value, duration: duration)
+    }
+
+    @objc func systemBrightnessChanged() {
+        let conversionThreshold: Float = 0.03 // threshold for conversion error value
+
+        //incase the control center is opened without any changes in the brightness.
+        //except setting the brightness value to the system one by the willResignActiveNotification observer.
+        //reseting the value of brightness to the player one.
+        if abs(Float(UIScreen.main.brightness - self.systemBrightness!)) <= conversionThreshold {
+            animateBrightness(to: CGFloat(self.brightnessControl.value))
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: {
+            // Compare the current screen brightness with the value from the brightness control.
+            // If they are different, the value is changed to the control center value.
+            // This is important to ensure we do not lose track of the actual system brightness setting
+
+            if abs(Float(UIScreen.main.brightness) - self.brightnessControl.value) > conversionThreshold {
+                let brightness = UIScreen.main.brightness
+                self.systemBrightness = brightness
+                self.brightnessControl.value = Float(brightness)
+                self.brightnessControlView.updateIcon(level: Float(brightness))
+            }
+        })
+    }
+
+    @objc func playerWillResignActive() {
+        animateBrightness(to: systemBrightness!)
+    }
+
+    @objc func playerWillEnterForeground() {
+        //updates the value of system brightness
+        //if the brightness is changed when the player was in the background
+        self.systemBrightness = UIScreen.main.brightness
+        animateBrightness(to: systemBrightness!)
+    }
+#endif
+
     // MARK: - Gesture handlers
 
     @objc func handlePlayPauseGesture() {
@@ -661,15 +864,10 @@ class PlayerViewController: UIViewController {
             return
         }
 
-        if playbackService.isPlaying {
-            playbackService.pause()
-            setControlsHidden(false, animated: playerController.isControlsHidden)
-        } else {
-            playbackService.play()
-        }
+        togglePlayPause()
     }
 
-    @objc private func handlePanGesture(recognizer: UIPanGestureRecognizer) {
+    @objc func handlePanGesture(recognizer: UIPanGestureRecognizer) {
         let verticalPanVelocity: Float = Float(recognizer.velocity(in: view).y)
 
         let currentPos = recognizer.location(in: view)
@@ -679,17 +877,25 @@ class PlayerViewController: UIViewController {
             return handleMinimizeGesture(recognizer)
         }
 
+#if os(iOS)
         guard panType == .projection
                 || (panType == .volume && playerController.isVolumeGestureEnabled)
                 || (panType == .brightness && playerController.isBrightnessGestureEnabled)
         else {
             return
         }
+#else
+        guard panType == .projection
+        else {
+            return
+        }
+#endif
 
         if recognizer.state == .began {
             isGestureActive = true
             var animations : (() -> Void)?
             currentPanType = panType
+#if os(iOS)
             switch currentPanType {
             case .brightness:
                 brightnessBackgroundGradientLayer.isHidden = false
@@ -708,6 +914,7 @@ class PlayerViewController: UIViewController {
             default:
                 break
             }
+#endif
             if let animations = animations {
                 UIView.animate(withDuration: 0.2, delay: 0,
                                options: .beginFromCurrentState, animations: animations,
@@ -720,6 +927,7 @@ class PlayerViewController: UIViewController {
         }
 
         switch currentPanType {
+#if os(iOS)
         case .volume:
             if recognizer.state == .changed || recognizer.state == .ended {
                 let newValue = volumeControl.value - (verticalPanVelocity * volumeControl.speed)
@@ -735,6 +943,7 @@ class PlayerViewController: UIViewController {
                 brightnessControl.applyValueToDevice()
                 brightnessControlView.updateIcon(level: brightnessControl.value)
             }
+#endif
         case .projection:
             updateProjection(with: recognizer)
         case .none:
@@ -744,6 +953,7 @@ class PlayerViewController: UIViewController {
         if recognizer.state == .ended {
             var animations : (() -> Void)?
 
+#if os(iOS)
             // Check if both of the sliders are visible to hide them at the same time
             if currentPanType == .brightness && volumeControlView.alpha == 1 ||
                 currentPanType == .volume && brightnessControlView.alpha == 1 {
@@ -767,7 +977,9 @@ class PlayerViewController: UIViewController {
                     sideBackgroundGradientView.alpha = 0
                 }
             }
+#endif
 
+#if os(iOS)
             if let animations = animations {
                 UIView.animate(withDuration: 0.2, delay: 0.5,
                                options: .beginFromCurrentState, animations: animations, completion: {
@@ -779,6 +991,10 @@ class PlayerViewController: UIViewController {
                     self.setControlsHidden(true, animated: true)
                 })
             }
+#else
+            self.isGestureActive = false
+            self.setControlsHidden(true, animated: true)
+#endif
 
             currentPanType = .none
             if playbackService.currentMediaIs360Video {
@@ -798,7 +1014,7 @@ class PlayerViewController: UIViewController {
         }
     }
 
-    @objc private func handleSwipeGestures(recognizer: UISwipeGestureRecognizer) {
+    @objc func handleSwipeGestures(recognizer: UISwipeGestureRecognizer) {
         guard playerController.isSwipeSeekGestureEnabled else {
             return
         }
@@ -834,40 +1050,34 @@ class PlayerViewController: UIViewController {
         }
     }
 
-    @objc private func handleMinimizeGesture(_ sender: UIPanGestureRecognizer) {
-        switch sender.state {
+    @objc private func handleMinimizeGesture(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: view)
+
+        switch gesture.state {
+        case .began:
+            // Save the initial center position of the view
+            minimizationInitialCenter = view.center
+
         case .changed:
-            viewTranslation = sender.translation(in: view)
-            if viewTranslation.y < 0 {
-                return
+            // Move the view with the pan gesture
+            if let initialCenter = minimizationInitialCenter, translation.y > 0 { // Only allow downward sliding
+                view.center = CGPoint(x: view.center.x, y: initialCenter.y + translation.y)
             }
 
-            UIView.animate(withDuration: 0.5,
-                           delay: 0,
-                           usingSpringWithDamping: 0.7,
-                           initialSpringVelocity: 1,
-                           options: .curveEaseOut,
-                           animations: {
-                self.view.transform = CGAffineTransform(translationX: 0, y: self.viewTranslation.y)
-            })
-
-            break
-        case .ended:
-            let height = view.frame.height * 0.1
-            if viewTranslation.y < height {
-                UIView.animate(withDuration: 0.5,
-                               delay: 0,
-                               usingSpringWithDamping: 0.7,
-                               initialSpringVelocity: 1,
-                               options: .curveEaseOut,
-                               animations: {
-                    self.view.transform = .identity
-                })
-            } else {
-                minimizePlayer()
+        case .ended, .cancelled, .failed:
+            // Determine if the view should be dismissed or return to its original position
+            if let initialCenter = minimizationInitialCenter {
+                if translation.y > view.bounds.height * 0.1 { // Adjust the threshold as needed
+                    minimizePlayer()
+                } else {
+                    // Animate the view returning to its original position
+                    UIView.animate(withDuration: 0.3) {
+                        self.view.center = initialCenter
+                    }
+                }
             }
 
-            break
+            minimizationInitialCenter = nil
         default:
             break
         }
@@ -878,17 +1088,48 @@ class PlayerViewController: UIViewController {
 
         executeSeekFromGesture(.tap)
     }
+
+    @objc func updatePlayerControls() {
+        // UPDATE THE PLAYER CONTROLS
+    }
 }
 
 // MARK: - VLCPlaybackServiceDelegate
 
 extension PlayerViewController: VLCPlaybackServiceDelegate {
+#if os(iOS)
+    func pictureInPictureStateDidChange(enabled: Bool) {
+        mediaNavigationBar.updatePictureInPictureButton(enabled: enabled)
+    }
+#endif
+
     func playbackPositionUpdated(_ playbackService: PlaybackService) {
         mediaScrubProgressBar.updateInterfacePosition()
     }
 
+    func mediaPlayerStateChanged(_ currentState: VLCMediaPlayerState, isPlaying: Bool, currentMediaHasTrackToChooseFrom: Bool, currentMediaHasChapters: Bool, for playbackService: PlaybackService) {
+        if currentState == .opening {
+            applyCustomEqualizerProfileIfNeeded()
+        }
+
+        if currentState == .stopped {
+            moreOptionsActionSheet.resetPlaybackSpeed()
+            mediaMoreOptionsActionSheetHideIcon(for: .playbackSpeed)
+            moreOptionsActionSheet.resetSleepTimer()
+            mediaMoreOptionsActionSheetHideIcon(for: .sleepTimer)
+        }
+    }
+
     func showStatusMessage(_ statusMessage: String) {
         statusLabel.showStatusMessage(statusMessage)
+    }
+
+    func reloadPlayQueue() {
+        guard let queueViewController = queueViewController else {
+            return
+        }
+
+        queueViewController.reload()
     }
 }
 
@@ -929,7 +1170,7 @@ extension PlayerViewController: MediaMoreOptionsActionSheetDelegate {
             showIcon(button: optionsNavigationBar.abRepeatMarksButton)
             break
         default:
-            assertionFailure("AudioPlayerViewController: Invalid option.")
+            assertionFailure("PlayerViewController: Invalid option.")
         }
     }
 
@@ -951,7 +1192,7 @@ extension PlayerViewController: MediaMoreOptionsActionSheetDelegate {
             hideIcon(button: optionsNavigationBar.abRepeatMarksButton)
             break
         default:
-            assertionFailure("AudioPlayerViewController: Invalid option.")
+            assertionFailure("PlayerViewController: Invalid option.")
         }
     }
 
@@ -972,6 +1213,10 @@ extension PlayerViewController: MediaMoreOptionsActionSheetDelegate {
 
             showPopup(equalizerPopupView, with: equalizerView, accessoryViewsDelegate: equalizerView)
         }
+    }
+
+    func mediaMoreOptionsActionSheetDisplayEqualizerAlert(_ alert: UIAlertController) {
+        present(alert, animated: true)
     }
 
     func mediaMoreOptionsActionSheetUpdateProgressBar() {
@@ -1045,6 +1290,7 @@ extension PlayerViewController: MediaMoreOptionsActionSheetDelegate {
                 alertController.addAction(mainAction)
             }
 
+            self.setControlsHidden(true, animated: true)
             self.present(alertController, animated: true, completion: nil)
             self.alertController = alertController
         }
@@ -1204,12 +1450,14 @@ extension PlayerViewController: DeviceMotionDelegate {
 
 // MARK: - VLCRendererDiscovererManagerDelegate
 
+#if os(iOS)
 extension PlayerViewController: VLCRendererDiscovererManagerDelegate {
     func removedCurrentRendererItem(_ item: VLCRendererItem) {
         changeOutputView(to: contentOutputView)
         mediaNavigationBar.updateDeviceButton(with: UIImage(named: "renderer"), color: .white)
     }
 }
+#endif
 
 // MARK: - Keyboard Controls
 
@@ -1234,54 +1482,123 @@ extension PlayerViewController {
         playbackService.playbackRate = 1.0
     }
 
+    @objc func keyNumber(_ n: Int) {
+        guard playbackService.isSeekable else { return }
+
+        // n=6 --> seek to 60%
+        playbackService.playbackPosition = (Float(n) / 10.0)
+    }
+
+    @objc func keyNumber1() {
+        keyNumber(1)
+    }
+
+    @objc func keyNumber2() {
+        keyNumber(2)
+    }
+
+    @objc func keyNumber3() {
+        keyNumber(3)
+    }
+
+    @objc func keyNumber4() {
+        keyNumber(4)
+    }
+
+    @objc func keyNumber5() {
+        keyNumber(5)
+    }
+
+    @objc func keyNumber6() {
+        keyNumber(6)
+    }
+
+    @objc func keyNumber7() {
+        keyNumber(7)
+    }
+
+    @objc func keyNumber8() {
+        keyNumber(8)
+    }
+
+    @objc func keyNumber9() {
+        keyNumber(9)
+    }
+
+    @objc func keyNumber0() {
+        keyNumber(0)
+    }
+
     override var keyCommands: [UIKeyCommand]? {
-        var commands: [UIKeyCommand] = [
-            UIKeyCommand(input: " ",
-                         modifierFlags: [],
-                         action: #selector(handlePlayPauseGesture),
-                         discoverabilityTitle: NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")),
-            UIKeyCommand(input: "\r",
-                         modifierFlags: [],
-                         action: #selector(handlePlayPauseGesture),
-                         discoverabilityTitle: NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")),
-            UIKeyCommand(input: UIKeyCommand.inputLeftArrow,
-                         modifierFlags: [],
-                         action: #selector(keyLeftArrow),
-                         discoverabilityTitle: NSLocalizedString("KEY_JUMP_BACKWARDS", comment: "")),
-            UIKeyCommand(input: UIKeyCommand.inputRightArrow,
-                         modifierFlags: [],
-                         action: #selector(keyRightArrow),
-                         discoverabilityTitle: NSLocalizedString("KEY_JUMP_FORWARDS", comment: "")),
-            UIKeyCommand(input: "[",
-                         modifierFlags: [],
-                         action: #selector(keyRightBracket),
-                         discoverabilityTitle: NSLocalizedString("KEY_INCREASE_PLAYBACK_SPEED", comment: "")),
-            UIKeyCommand(input: "]",
-                         modifierFlags: [],
-                         action: #selector(keyLeftBracket),
-                         discoverabilityTitle: NSLocalizedString("KEY_DECREASE_PLAYBACK_SPEED", comment: ""))
-        ]
+        let playPauseSpace = UIKeyCommand(input: " ",
+                                          modifierFlags: [],
+                                          action: #selector(handlePlayPauseGesture))
+        playPauseSpace.discoverabilityTitle = NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")
+        let playPauseReturn = UIKeyCommand(input: "\r",
+                                           modifierFlags: [],
+                                           action: #selector(handlePlayPauseGesture))
+        playPauseReturn.discoverabilityTitle = NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")
+        let jumpBack = UIKeyCommand(input: UIKeyCommand.inputLeftArrow,
+                                    modifierFlags: [],
+                                    action: #selector(keyLeftArrow))
+        jumpBack.discoverabilityTitle = NSLocalizedString("KEY_JUMP_BACKWARDS", comment: "")
+        let jumpForward = UIKeyCommand(input: UIKeyCommand.inputRightArrow,
+                                       modifierFlags: [],
+                                       action: #selector(keyRightArrow))
+        jumpForward.discoverabilityTitle = NSLocalizedString("KEY_JUMP_FORWARDS", comment: "")
+        let increaseSpeed = UIKeyCommand(input: "[",
+                                         modifierFlags: [],
+                                         action: #selector(keyRightBracket))
+        increaseSpeed.discoverabilityTitle = NSLocalizedString("KEY_INCREASE_PLAYBACK_SPEED", comment: "")
+        let decreaseSpeed = UIKeyCommand(input: "]",
+                                         modifierFlags: [],
+                                         action: #selector(keyLeftBracket))
+        decreaseSpeed.discoverabilityTitle = NSLocalizedString("KEY_DECREASE_PLAYBACK_SPEED", comment: "")
+
+        var commands: [UIKeyCommand] = {
+            let playPauseCommand1 = UIKeyCommand(input: " ", modifierFlags: [], action: #selector(handlePlayPauseGesture))
+            playPauseCommand1.discoverabilityTitle = NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")
+
+            let playPauseCommand2 = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(handlePlayPauseGesture))
+            playPauseCommand2.discoverabilityTitle = NSLocalizedString("PLAY_PAUSE_BUTTON", comment: "")
+
+            let leftArrowCommand = UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(keyLeftArrow))
+            leftArrowCommand.discoverabilityTitle = NSLocalizedString("KEY_JUMP_BACKWARDS", comment: "")
+
+            let rightArrowCommand = UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(keyRightArrow))
+            rightArrowCommand.discoverabilityTitle = NSLocalizedString("KEY_JUMP_FORWARDS", comment: "")
+
+            let increaseSpeedCommand = UIKeyCommand(input: "[", modifierFlags: [], action: #selector(keyRightBracket))
+            increaseSpeedCommand.discoverabilityTitle = NSLocalizedString("KEY_INCREASE_PLAYBACK_SPEED", comment: "")
+
+            let decreaseSpeedCommand = UIKeyCommand(input: "]", modifierFlags: [], action: #selector(keyLeftBracket))
+            decreaseSpeedCommand.discoverabilityTitle = NSLocalizedString("KEY_DECREASE_PLAYBACK_SPEED", comment: "")
+
+            let numberCommands = (0...9).map { number -> UIKeyCommand in
+                let input = "\(number)"
+                let selector = Selector("keyNumber\(number)")
+                let command = UIKeyCommand(input: input, modifierFlags: [], action: selector)
+                command.discoverabilityTitle = String(format:NSLocalizedString("KEY_SEEK_TO_PERCENT", comment: ""), number * 10)
+                return command
+            }
+
+            return [playPauseCommand1, playPauseCommand2, leftArrowCommand, rightArrowCommand, increaseSpeedCommand, decreaseSpeedCommand] + numberCommands
+        }()
 
         if abs(playbackService.playbackRate - 1.0) > .ulpOfOne {
-            commands.append(UIKeyCommand(input: "=",
-                                         modifierFlags: [],
-                                         action: #selector(keyEqual),
-                                         discoverabilityTitle: NSLocalizedString("KEY_RESET_PLAYBACK_SPEED",
-                                                                                 comment: "")))
+            let resetSpeed = UIKeyCommand(input: "=",
+                                          modifierFlags: [],
+                                          action: #selector(keyEqual))
+            resetSpeed.discoverabilityTitle = NSLocalizedString("KEY_RESET_PLAYBACK_SPEED",
+                                                                comment: "")
+            commands.append(resetSpeed)
         }
 
         if #available(iOS 15, *) {
             commands.forEach {
                 if $0.input == UIKeyCommand.inputRightArrow
                     || $0.input == UIKeyCommand.inputLeftArrow {
-                    ///UIKeyCommand.wantsPriorityOverSystemBehavior is introduced in iOS 15 SDK
-                    ///but we actually still use Xcode 12.4 on CI. This old version only provides
-                    ///SDK for iOS 14.4 max. Hence we use ObjC apis to call the method and still
-                    ///have the ability to build with older Xcode versions.
-                    let selector = NSSelectorFromString("setWantsPriorityOverSystemBehavior:")
-                    if $0.responds(to: selector) {
-                        $0.perform(selector, with: true)
-                    }
+                    $0.wantsPriorityOverSystemBehavior = true
                 }
             }
         }

@@ -37,6 +37,7 @@ class TitleSelectionTableViewCell: UITableViewCell {
 
         let checkImageView: UIImageView = UIImageView(image: checkmarkImage)
         checkImageView.alpha = 0
+        checkImageView.tintColor = PresentationTheme.currentExcludingWhite.colors.orangeUI
         checkImageView.translatesAutoresizingMaskIntoConstraints = false
         return checkImageView
     }()
@@ -70,16 +71,10 @@ class TitleSelectionTableViewCell: UITableViewCell {
         mainStackView.addArrangedSubview(checkImageView)
         mainStackView.addArrangedSubview(contentLabel)
 
-        var layoutGuide = layoutMarginsGuide
-
-        if #available(iOS 11.0, *) {
-            layoutGuide = safeAreaLayoutGuide
-        }
-
         NSLayoutConstraint.activate([
-            mainStackView.leadingAnchor.constraint(equalTo: layoutGuide.leadingAnchor,
+            mainStackView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor,
                                                    constant: 5),
-            mainStackView.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor,
+            mainStackView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor,
                                                     constant: -5),
             mainStackView.topAnchor.constraint(equalTo: topAnchor),
             mainStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -101,7 +96,7 @@ class TitleSelectionView: UIView {
 
     private lazy var backgroundView: UIView = {
         let backgroundView = UIView()
-        backgroundView.frame = UIScreen.main.bounds
+        backgroundView.frame = self.frame
         backgroundView.isAccessibilityElement = true
         backgroundView.accessibilityLabel = NSLocalizedString("TITLESELECTION_BACKGROUND_LABEL",
                                                               comment: "")
@@ -145,19 +140,13 @@ class TitleSelectionView: UIView {
     private var audioTableViewHeight: CGFloat {
         let rowsCount: CGFloat = CGFloat(playbackService.numberOfAudioTracks)
         let tableViewHeight = (rowsCount * TitleSelectionTableViewCell.size) + TitleSelectionTableViewCell.size
-        if #available(iOS 11.0, *) {
-            return tableViewHeight + safeAreaInsets.bottom
-        }
-        return tableViewHeight
+        return tableViewHeight + safeAreaInsets.bottom
     }
 
     private var subtitleTableViewHeight: CGFloat {
         let rowsCount: CGFloat = CGFloat(playbackService.numberOfVideoSubtitlesIndexes)
         let tableViewHeight = (rowsCount * TitleSelectionTableViewCell.size) + TitleSelectionTableViewCell.size
-        if #available(iOS 11.0, *) {
-            return tableViewHeight + safeAreaInsets.bottom
-        }
-        return tableViewHeight
+        return tableViewHeight + safeAreaInsets.bottom
     }
 
     private lazy var audioTableViewHeightConstraint = audioTableView.heightAnchor.constraint(equalToConstant: audioTableViewHeight)
@@ -216,14 +205,8 @@ private extension TitleSelectionView {
 
     private func setupTableViews() {
         if #available(iOS 15, *) {
-            // Workaround in order to be able to compile with an older SDK
-            let sectionHeaderTopPaddingSelector = NSSelectorFromString("setSectionHeaderTopPadding:")
-            if audioTableView.responds(to: sectionHeaderTopPaddingSelector) {
-                audioTableView.perform(sectionHeaderTopPaddingSelector, with: 0)
-            }
-            if subtitleTableView.responds(to: sectionHeaderTopPaddingSelector) {
-                subtitleTableView.perform(sectionHeaderTopPaddingSelector, with: 0)
-            }
+            audioTableView.sectionHeaderTopPadding = 0
+            subtitleTableView.sectionHeaderTopPadding = 0
         }
 
         audioTableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: audioTableView.frame.size.width, height: 1))
@@ -288,24 +271,32 @@ extension TitleSelectionView: UITableViewDelegate, UITableViewDataSource {
         cell.backgroundColor = .clear
 
         var cellTitle: String = ""
+        var textColor: UIColor = PresentationTheme.currentExcludingWhite.colors.cellTextColor
+
         if tableView == audioTableView {
             if playbackService.indexOfCurrentAudioTrack == indexPath.row {
-                cell.textLabel?.textColor = PresentationTheme.darkTheme.colors.orangeUI
+                textColor = PresentationTheme.currentExcludingWhite.colors.orangeUI
                 cell.checkImageView.alpha = 1
             }
             cellTitle = playbackService.audioTrackName(at: indexPath.row)
 
         } else {
             if playbackService.indexOfCurrentSubtitleTrack == indexPath.row {
-                cell.textLabel?.textColor = PresentationTheme.darkTheme.colors.orangeUI
+                textColor = PresentationTheme.currentExcludingWhite.colors.orangeUI
                 cell.checkImageView.alpha = 1
             }
-            cellTitle = playbackService.videoSubtitleName(at: indexPath.row)
+
+            let count = playbackService.numberOfVideoSubtitlesIndexes
+            cellTitle = indexPath.row == count - 1 ? NSLocalizedString("DOWNLOAD_SUBS_FROM_OSO", comment: "") :
+                        playbackService.videoSubtitleName(at: indexPath.row)
         }
+
         if cellTitle == "Disable" {
             cellTitle = NSLocalizedString("DISABLE_LABEL", comment: "")
         }
+
         cell.contentLabel.text = cellTitle
+        cell.contentLabel.textColor = textColor
         return cell
     }
 

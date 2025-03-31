@@ -5,9 +5,9 @@
  * Copyright (c) 2013-2019 VideoLAN. All rights reserved.
  * $Id$
  *
- * Authors: Felix Paul Kühne <fkuehne # videolan.org>
- *          Carola Nitz <nitz.carola # googlemail.com>
- *
+ * Authors:  Felix Paul Kühne <fkuehne # videolan.org>
+ *        Carola Nitz <nitz.carola # googlemail.com>
+ *        Eshan Singh <eeeshan789 # gmail.com>
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
 
@@ -20,6 +20,7 @@
 
 @class VLCNetworkImageView;
 @class ODItem;
+@class VLCPCloudCellContentWrapper;
 
 @interface VLCCloudStorageTableViewCell : UITableViewCell
 
@@ -30,7 +31,9 @@
 @property (nonatomic, strong) IBOutlet UILabel *subtitleLabel;
 @property (nonatomic, strong) IBOutlet VLCNetworkImageView *thumbnailView;
 @property (nonatomic, strong) IBOutlet UIButton *downloadButton;
+@property (nonatomic, strong) IBOutlet UIButton *favouriteButton;
 
+@property (nonatomic, retain) VLCPCloudCellContentWrapper *pcloudFile;
 @property (nonatomic, retain) DBFILESMetadata *dropboxFile;
 @property (nonatomic, retain) ODItem *oneDriveFile;
 @property (nonatomic, retain) BoxItem *boxFile;
@@ -39,6 +42,9 @@
 #endif
 
 @property (nonatomic, readwrite) BOOL isDownloadable;
+@property (nonatomic, readwrite) BOOL isFavourite;
+// We use this property here to determine folders
+@property (nonatomic, readwrite) BOOL isFavourable;
 
 + (VLCCloudStorageTableViewCell *)cellWithReuseIdentifier:(NSString *)ident;
 + (CGFloat)heightOfCell;
@@ -49,6 +55,8 @@
 
 @protocol VLCCloudStorageTableViewCell <NSObject>
 
+@optional
 - (void)triggerDownloadForCell:(VLCCloudStorageTableViewCell *)cell;
+- (void)triggerFavoriteForCell:(VLCCloudStorageTableViewCell *)cell;
 
 @end

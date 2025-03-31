@@ -15,14 +15,18 @@ protocol AudioPlayerViewDelegate: AnyObject {
     func audioPlayerViewDelegateGetThumbnail(_ audioPlayerView: AudioPlayerView) -> UIImage?
     func audioPlayerViewDelegateGetPlaybackSpeed(_ audioPlayerView: AudioPlayerView) -> Float
     func audioPlayerViewDelegateDidTapShuffleButton(_ audioPlayerView: AudioPlayerView)
+    func audioPlayerViewDelegateDidTapBackwardButton(_ audioPlayerView: AudioPlayerView)
     func audioPlayerViewDelegateDidTapPreviousButton(_ audioPlayerView: AudioPlayerView)
     func audioPlayerViewDelegateDidTapPlayButton(_ audioPlayerView: AudioPlayerView)
     func audioPlayerViewDelegateDidTapNextButton(_ audioPlayerView: AudioPlayerView)
+    func audioPlayerViewDelegateDidTapForwardButton(_ audioPlayerView: AudioPlayerView)
     func audioPlayerViewDelegateDidTapRepeatButton(_ audioPlayerView: AudioPlayerView)
     func audioPlayerViewDelegateDidTapPlaybackSpeedButton(_ audioPlayerView: AudioPlayerView)
     func audioPlayerViewDelegateDidLongPressPlaybackSpeedButton(_ audioPlayerView: AudioPlayerView)
-    func audioPlayerViewDelegateGetBrightnessSlider(_ audioPlayerView: AudioPlayerView) -> BrightnessControlView
+    #if os(iOS)
     func audioPlayerViewDelegateGetVolumeSlider(_ audioPlayerView: AudioPlayerView) -> VolumeControlView
+    func audioPlayerViewDelegateGetBrightnessSlider(_ audioPlayerView: AudioPlayerView) -> BrightnessControlView
+    #endif
 }
 
 class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
@@ -73,6 +77,19 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
         shuffleButton.accessibilityLabel = NSLocalizedString("SHUFFLE", comment: "")
         shuffleButton.accessibilityHint = NSLocalizedString("SHUFFLE_HINT", comment: "")
         return shuffleButton
+    }()
+
+    private lazy var backwardButton: UIButton = {
+        let backwardButton = UIButton(type: .system)
+        backwardButton.setImage(UIImage(named: "iconSkipBack"), for: .normal)
+        backwardButton.contentMode = .scaleAspectFit
+        backwardButton.imageView?.contentMode = .scaleAspectFit
+        backwardButton.tintColor = .white
+        backwardButton.addTarget(self, action: #selector(handleBackwardButton), for: .touchUpInside)
+        backwardButton.accessibilityLabel = NSLocalizedString("BACKWARD_BUTTON", comment: "")
+        backwardButton.accessibilityHint = NSLocalizedString("BACKWARD_HINT", comment: "")
+        backwardButton.isHidden = true
+        return backwardButton
     }()
 
     private lazy var previousButton: UIButton = {
@@ -126,6 +143,19 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
         return nextButton
     }()
 
+    private lazy var forwardButton: UIButton = {
+        let forwardButton = UIButton(type: .system)
+        forwardButton.setImage(UIImage(named: "iconSkipForward"), for: .normal)
+        forwardButton.contentMode = .scaleAspectFit
+        forwardButton.imageView?.contentMode = .scaleAspectFit
+        forwardButton.tintColor = .white
+        forwardButton.addTarget(self, action: #selector(handleForwardButton), for: .touchUpInside)
+        forwardButton.accessibilityLabel = NSLocalizedString("FORWARD_BUTTON", comment: "")
+        forwardButton.accessibilityHint = NSLocalizedString("FORWARD_HINT", comment: "")
+        forwardButton.isHidden = true
+        return forwardButton
+    }()
+
     private lazy var repeatButton: UIButton = {
         let repeatButton = UIButton(type: .system)
         repeatButton.setImage(UIImage(named: "iconRepeatLarge"), for: .normal)
@@ -140,24 +170,18 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
 
     lazy var progressionView: UIView = UIView()
 
-    lazy var layoutGuide: UILayoutGuide = {
-        var layoutGuide = layoutMarginsGuide
-
-        if #available(iOS 11.0, *) {
-            layoutGuide = safeAreaLayoutGuide
-        }
-
-        return layoutGuide
-    }()
-
     private var thumbnailImageViewWidthConstant: CGFloat = 270.0
 
     private lazy var progressionViewBottomConstant: CGFloat = {
+#if os(iOS)
         let isSmallerScreen: Bool = UIScreen.main.bounds.width <= DeviceDimensions.iPhone4sPortrait.rawValue
         return isSmallerScreen ? 40 : 60
+#else
+        return 60
+#endif
     }()
 
-    private lazy var progressionViewBottomConstraint: NSLayoutConstraint = progressionView.bottomAnchor.constraint(equalTo: layoutGuide.bottomAnchor, constant: -progressionViewBottomConstant)
+    private lazy var progressionViewBottomConstraint: NSLayoutConstraint = progressionView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -progressionViewBottomConstant)
 
     private lazy var progressionViewHeightConstraint: NSLayoutConstraint = progressionView.heightAnchor.constraint(equalToConstant: 70)
 
@@ -348,9 +372,22 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
         playbackSpeedButton.alpha = enabled ? 1.0 : 0.5
     }
 
+    func shouldEnableSeekButtons(_ enabled: Bool) {
+        backwardButton.isEnabled = enabled
+        backwardButton.isHidden = !enabled
+        forwardButton.isEnabled = enabled
+        forwardButton.isHidden = !enabled
+
+        previousButton.isEnabled = !enabled
+        previousButton.isHidden = enabled
+        nextButton.isEnabled = !enabled
+        nextButton.isHidden = enabled
+    }
+
     func updateConstraints(for orientation: UIDeviceOrientation) {
         let isPad: Bool = UIDevice.current.userInterfaceIdiom == .pad
 
+#if os(iOS)
         if orientation.isLandscape {
             thumbnailViewTopConstraint.constant = 5
             progressionViewBottomConstraint.constant = -5.0
@@ -362,6 +399,12 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
             progressionViewHeightConstraint.constant = 70
             controlsStackView.spacing = isPad ? controlsStackViewMinSpacing * 2 : controlsStackViewMinSpacing
         }
+#else
+        thumbnailViewTopConstraint.constant = 5
+        progressionViewBottomConstraint.constant = -5.0
+        progressionViewHeightConstraint.constant = 30
+        controlsStackView.spacing = controlsStackViewMaxSpacing * 2
+#endif
 
         setNeedsLayout()
         layoutIfNeeded()
@@ -431,9 +474,9 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
 
         addSubview(navigationBarView)
         NSLayoutConstraint.activate([
-            navigationBarView.leadingAnchor.constraint(equalTo: layoutGuide.leadingAnchor, constant: padding),
-            navigationBarView.topAnchor.constraint(equalTo: layoutGuide.topAnchor, constant: padding),
-            navigationBarView.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor, constant: -padding)
+            navigationBarView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: padding),
+            navigationBarView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: padding),
+            navigationBarView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -padding)
         ])
     }
 
@@ -442,9 +485,9 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
 
         addSubview(thumbnailView)
         NSLayoutConstraint.activate([
-            thumbnailView.leadingAnchor.constraint(equalTo: layoutGuide.leadingAnchor),
+            thumbnailView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
             thumbnailViewTopConstraint,
-            thumbnailView.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor),
+            thumbnailView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
         ])
 
         setupThumbnailSubviews()
@@ -524,9 +567,11 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
         ])
 
         controlsStackView.addArrangedSubview(shuffleButton)
+        controlsStackView.addArrangedSubview(backwardButton)
         controlsStackView.addArrangedSubview(previousButton)
         controlsStackView.addArrangedSubview(playButton)
         controlsStackView.addArrangedSubview(nextButton)
+        controlsStackView.addArrangedSubview(forwardButton)
         controlsStackView.addArrangedSubview(repeatButton)
         
         secondaryControlStackView.addArrangedSubview(playbackSpeedButton)
@@ -536,23 +581,31 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func setupProgressionView() {
+#if os(iOS)
         let isSmallerScreen: Bool = UIScreen.main.bounds.width <= DeviceDimensions.iPhone4sPortrait.rawValue
         let padding: CGFloat = isSmallerScreen ? 10.0 : 25.0
+#else
+        let padding: CGFloat = 25.0
+#endif
 
         progressionView.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(progressionView)
         NSLayoutConstraint.activate([
-            progressionView.leadingAnchor.constraint(equalTo: layoutGuide.leadingAnchor, constant: padding),
+            progressionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: padding),
             progressionView.topAnchor.constraint(equalTo: secondaryControlStackView.bottomAnchor, constant: padding),
-            progressionView.trailingAnchor.constraint(equalTo: layoutGuide.trailingAnchor, constant: -padding),
+            progressionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -padding),
             progressionViewBottomConstraint,
             progressionViewHeightConstraint
         ])
     }
 
     private func applyCornerRadius() {
+#if os(iOS)
         let cornerRadius = UIScreen.main.displayCornerRadius
+#else
+        let cornerRadius = 5.0
+#endif
         overlayView.layer.cornerRadius = cornerRadius
         backgroundView.layer.cornerRadius = cornerRadius
     }
@@ -561,6 +614,10 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
 
     @objc func handleShuffleButton(_ sender: Any) {
         delegate?.audioPlayerViewDelegateDidTapShuffleButton(self)
+    }
+
+    @objc func handleBackwardButton(_ sender: Any) {
+        delegate?.audioPlayerViewDelegateDidTapBackwardButton(self)
     }
 
     @objc func handlePreviousButton(_ sender: Any) {
@@ -573,6 +630,10 @@ class AudioPlayerView: UIView, UIGestureRecognizerDelegate {
 
     @objc func handleNextButton(_ sender: Any) {
         delegate?.audioPlayerViewDelegateDidTapNextButton(self)
+    }
+
+    @objc func handleForwardButton(_ sender: Any) {
+        delegate?.audioPlayerViewDelegateDidTapForwardButton(self)
     }
 
     @objc func handleRepeatButton(_ sender: Any) {

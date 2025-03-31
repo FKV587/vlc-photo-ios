@@ -5,6 +5,7 @@
  *
  * Authors: Soomin Lee <bubu@mikan.io>
  *          Andrew Breckenridge <asbreckenridge # me.com>
+ *          Diogo Simao Marques <dogo@videolabs.io>
  *
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
@@ -19,7 +20,7 @@ protocol AddToCollectionViewControllerDelegate: AnyObject {
                                        newCollectionName name: String,
                                        from mlType: MediaCollectionModel.Type)
     func addToCollectionViewControllerMoveCollections(_
-        addToCollectionViewController: AddToCollectionViewController)
+                                                      addToCollectionViewController: AddToCollectionViewController)
 }
 
 enum AddToCollectionSection: Int, CaseIterable {
@@ -47,9 +48,7 @@ class AddToCollectionViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        if #available(iOS 11.0, *) {
-            navigationController?.navigationBar.prefersLargeTitles = false
-        }
+        navigationController?.navigationBar.prefersLargeTitles = false
         navigationController?.navigationBar.isTranslucent = false
         collectionView.reloadData()
     }
@@ -57,17 +56,14 @@ class AddToCollectionViewController: UIViewController {
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
         initViews()
-    }
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(themeDidChange),
                                                name: .VLCThemeDidChangeNotification,
                                                object: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -77,16 +73,18 @@ class AddToCollectionViewController: UIViewController {
     override func viewSafeAreaInsetsDidChange() {
         collectionView.collectionViewLayout.invalidateLayout()
     }
-    
-     override func viewDidLayoutSubviews() {
-          super.viewDidLayoutSubviews()
-          collectionView.collectionViewLayout.invalidateLayout()
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView.collectionViewLayout.invalidateLayout()
     }
 
     @objc private func themeDidChange() {
         view.backgroundColor = PresentationTheme.current.colors.background
         collectionView.backgroundColor = PresentationTheme.current.colors.background
+#if os(iOS)
         setNeedsStatusBarAppearanceUpdate()
+#endif
     }
 
     @objc private func dismissView() {
@@ -145,7 +143,7 @@ class AddToCollectionViewController: UIViewController {
                                           style: .default) {
             [weak alertController] _ in
             guard let alertController = alertController,
-                let textField = alertController.textFields?.first else { return }
+                  let textField = alertController.textFields?.first else { return }
 
             guard let text = textField.text, text != "" else {
                 DispatchQueue.main.async {
@@ -208,7 +206,7 @@ private extension AddToCollectionViewController {
     private func setupCollectionView() {
         let cellNib = UINib(nibName: MediaCollectionViewCell.nibName, bundle: nil)
         collectionView.register(cellNib,
-                                        forCellWithReuseIdentifier: MediaCollectionViewCell.defaultReuseIdentifier)
+                                forCellWithReuseIdentifier: MediaCollectionViewCell.defaultReuseIdentifier)
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.collectionViewLayout = collectionViewLayout
@@ -237,7 +235,7 @@ extension AddToCollectionViewController: UICollectionViewDelegateFlowLayout {
 extension AddToCollectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         if  collectionModelType is VLCMLMediaGroup.Type
-            && indexPath.section == AddToCollectionSection.moveToRoot.rawValue {
+                && indexPath.section == AddToCollectionSection.moveToRoot.rawValue {
             delegate?.addToCollectionViewControllerMoveCollections(self)
             return
         }
@@ -253,6 +251,10 @@ extension AddToCollectionViewController: UICollectionViewDelegate {
 // MARK: - UICollectionViewDataSource
 
 extension AddToCollectionViewController: UICollectionViewDataSource {
+
+    func reloadData() {
+        self.collectionView.reloadData()
+    }
     func numberOfSections(in collectionView: UICollectionView) -> Int {
         // Do not add the moveToRoot action for playlists
         if collectionModelType is VLCMLPlaylist.Type {

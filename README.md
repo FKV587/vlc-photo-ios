@@ -59,7 +59,7 @@ Mostly for debugging or advanced users, you might want to have a custom local VL
 
     `./compileAndBuildVLCKit.sh -a ${MYARCH}`
 
-    MYARCH can be `i386` `x86_64` `armv7` `armv7s` or `aarch64`.
+    MYARCH can be `x86_64` or `aarch64`.
 
     Add `-d` for a debug build (to have valid stack straces and asserts).
 
@@ -127,7 +127,7 @@ If you have any question or if you're not sure it's actually an issue, please vi
 
 You have encountered an issue and wish to report it to the VLC dev team?
 
-You can create one on our [GitLab](https://code.videolan.org/videolan/vlc-ios/issues) or on our [bug tracker](https://trac.videolan.org/vlc/).
+You can create one on our [GitLab](https://code.videolan.org/videolan/vlc-ios/issues).
 
 Before creating an issue or ticket, please double check for duplicates!
 
@@ -135,11 +135,11 @@ Before creating an issue or ticket, please double check for duplicates!
 
 Want to quickly get in touch with us for a question, or even just to talk?
 
-You will always find someone from the VLC team on IRC, __#videolan__ channel on the freenode network.
+You will always find someone from the VLC team on IRC, __#videolan__ channel on the Libera Chat network.
 
 For VLC-iOS specific questions, you can find us on __#vlc-ios__.
 
-If you don't have an IRC client, you can always use the [freenode webchat](https://webchat.freenode.net/).
+If you don't have an IRC client, you can always use the [Libera Chat webchat](https://web.libera.chat/?channels=#videolan,%23vlc-ios).
 
 ## Code of Conduct
 

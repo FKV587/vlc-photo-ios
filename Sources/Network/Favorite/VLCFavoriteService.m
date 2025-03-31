@@ -2,7 +2,7 @@
  * VLCFavoriteService.m
  * VLC for iOS
  *****************************************************************************
- * Copyright (c) 2023 VideoLAN. All rights reserved.
+ * Copyright (c) 2023-2024 VideoLAN. All rights reserved.
  * $Id$
  *
  * Authors: Felix Paul Kühne <fkuehne # videolan.org>
@@ -11,12 +11,14 @@
  *****************************************************************************/
 
 #import "VLCFavoriteService.h"
+#import "VLCNetworkServerLoginInformation+Keychain.h"
 
 NSString *VLCFavoritesContent = @"VLCFavoritesContent";
 NSString *VLCFavoriteUserVisibleName = @"VLCFavoriteUserVisibleName";
 NSString *VLCFavoriteURL = @"VLCFavoriteURL";
 NSString *VLCFavoriteArray = @"VLCFavoriteArray";
 NSString *VLCFavoritesFile = @"Favorites.plist";
+NSString *VLCTransitionedUPnPFavorites = @"VLCTransitionedUPnPFavorites";
 
 @implementation VLCFavorite
 
@@ -34,6 +36,28 @@ NSString *VLCFavoritesFile = @"Favorites.plist";
 {
     [coder encodeObject:self.userVisibleName forKey:VLCFavoriteUserVisibleName];
     [coder encodeObject:self.url forKey:VLCFavoriteURL];
+}
+
+- (NSString *)protocolIdentifier
+{
+    return [[self.url scheme] uppercaseString];
+}
+
+- (VLCNetworkServerLoginInformation *)loginInformation
+{
+    VLCNetworkServerLoginInformation *login = [VLCNetworkServerLoginInformation loginInformationWithKeychainIdentifier: self.url.absoluteString];
+    NSError *error = nil;
+    if ([login loadLoginInformationFromKeychainWithError:&error]) {
+        if (login.username == nil) {
+            /* in case the username wasn't saved per directory, try for the entire server */
+            NSString *identifier = [NSString stringWithFormat:@"%@://%@", self.protocolIdentifier, self.url.host];
+            login = [VLCNetworkServerLoginInformation loginInformationWithKeychainIdentifier:identifier];
+            [login loadLoginInformationFromKeychainWithError:&error];
+            /* restore the trick from above so we open the actually requested directory */
+            login.address = [self.url.host stringByAppendingPathComponent:self.url.path];
+        }
+    }
+    return login;
 }
 
 @end
@@ -77,7 +101,15 @@ NSString *VLCFavoritesFile = @"Favorites.plist";
 {
     self = [super init];
     if (self) {
-        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+        NSSearchPathDirectory directory;
+#if TARGET_OS_IOS
+        directory = NSLibraryDirectory;
+#else
+        // There is no permanent storage on tvOS, we need to store the favorites in the cache directory.
+        // This data may be erased without a warning when the space runs low on the physical device.
+        directory = NSCachesDirectory;
+#endif
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(directory, NSUserDomainMask, YES);
         NSString *libraryFolder = [paths firstObject];
         _filePath = [libraryFolder stringByAppendingPathComponent:VLCFavoritesFile];
 
@@ -88,15 +120,38 @@ NSString *VLCFavoritesFile = @"Favorites.plist";
             }
         }
 
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
         if (_favoriteContentArray == nil) {
             _favoriteContentArray = [NSMutableArray array];
+            [defaults setBool:YES forKey:VLCTransitionedUPnPFavorites];
+        } else {
+            if (![defaults boolForKey:VLCTransitionedUPnPFavorites]) {
+                [self _transitionUPnPFavorites];
+                [defaults setBool:YES forKey:VLCTransitionedUPnPFavorites];
+            }
         }
+
         _serverHostnameArray = [NSMutableArray arrayWithCapacity:_favoriteContentArray.count];
         for (VLCFavoriteServer *server in _favoriteContentArray) {
             [_serverHostnameArray addObject:server.url.host];
         }
     }
     return self;
+}
+
+- (void)_transitionUPnPFavorites
+{
+    for (VLCFavoriteServer *server in _favoriteContentArray) {
+        for (VLCFavorite *favorite in server.favorites) {
+            NSString *stringURL = favorite.url.absoluteString;
+            if ([stringURL hasPrefix:@"upnp://http//"]) {
+                stringURL = [stringURL stringByReplacingOccurrencesOfString:@"upnp://http//" withString:@"upnp://"];
+                [favorite setUrl:[NSURL URLWithString:stringURL]];
+            }
+        }
+    }
+    [self storeContent];
 }
 
 - (void)storeContent
@@ -107,6 +162,14 @@ NSString *VLCFavoritesFile = @"Favorites.plist";
             [data writeToFile:self->_filePath atomically:YES];
         }
     });
+}
+
+- (void)storeContentSynchronously
+{
+    @synchronized (self->_favoriteContentArray) {
+        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:self->_favoriteContentArray];
+        [data writeToFile:self->_filePath atomically:YES];
+    }
 }
 
 - (NSInteger)numberOfFavoritedServers

@@ -6,6 +6,7 @@
  * $Id$
  *
  * Author: Felix Paul Kühne <fkuehne # videolan.org>
+ *          Diogo Simao Marques <dogo@videolabs.io>
  *
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
@@ -16,6 +17,8 @@
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpartial-availability"
+
+NSString *const VLCDisplayPlayQueueCarPlay = @"VLCDisplayPlayQueueCarPlay";
 
 @implementation VLCNowPlayingTemplateObserver
 
@@ -31,6 +34,10 @@
         [notificationCenter addObserver:self
                                selector:@selector(playModeUpdated:)
                                    name:VLCPlaybackServicePlaybackModeUpdated
+                                 object:nil];
+        [notificationCenter addObserver:self
+                               selector:@selector(shuffleModeUpdated)
+                                   name:VLCPlaybackServiceShuffleModeUpdated
                                  object:nil];
     }
     return self;
@@ -49,12 +56,10 @@
                 reportedRepeatType = MPRepeatTypeAll;
                 vlcRepeatMode = VLCRepeatAllItems;
                 break;
-
             case VLCRepeatAllItems:
                 reportedRepeatType = MPRepeatTypeOff;
                 vlcRepeatMode = VLCDoNotRepeat;
                 break;
-
             default:
                 reportedRepeatType = MPRepeatTypeOne;
                 vlcRepeatMode = VLCRepeatCurrentItem;
@@ -91,7 +96,10 @@
 
 - (void)nowPlayingTemplateUpNextButtonTapped:(CPNowPlayingTemplate *)nowPlayingTemplate
 {
-    [[VLCPlaybackService sharedInstance] next];
+//    When CarPlay calls this method on your observer, you should push an instance of CPListTemplate—other template
+//    types are not supported when Now Playing is the visible template—on to your navigation stack that displays a
+//    list of upcoming or queued content (cf. CPNowPlayingTemplate documentation)
+    [[NSNotificationCenter defaultCenter] postNotificationName:VLCDisplayPlayQueueCarPlay object:self];
 }
 
 - (void)playModeUpdated:(NSNotification *)aNotification
@@ -104,21 +112,27 @@
         case VLCRepeatCurrentItem:
             reportedRepeatType = MPRepeatTypeOne;
             break;
-
         case VLCRepeatAllItems:
             reportedRepeatType = MPRepeatTypeAll;
             break;
-
         default:
             reportedRepeatType = MPRepeatTypeOff;
     }
     [MPRemoteCommandCenter sharedCommandCenter].changeRepeatModeCommand.currentRepeatType = reportedRepeatType;
+}
 
+- (void)shuffleModeUpdated
+{
+    VLCPlaybackService *vps = [VLCPlaybackService sharedInstance];
+
+    MPShuffleType shuffleType;
     if (vps.shuffleMode) {
-        [MPRemoteCommandCenter sharedCommandCenter].changeShuffleModeCommand.currentShuffleType = MPShuffleTypeItems;
+        shuffleType = MPShuffleTypeItems;
     } else {
-        [MPRemoteCommandCenter sharedCommandCenter].changeShuffleModeCommand.currentShuffleType = MPShuffleTypeOff;
+        shuffleType = MPShuffleTypeOff;
     }
+
+    [MPRemoteCommandCenter sharedCommandCenter].changeShuffleModeCommand.currentShuffleType = shuffleType;
 }
 
 @end

@@ -53,12 +53,12 @@
 
 @implementation VLCHTTPConnection
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 static NSMutableDictionary *authentificationAttemptsHosts;
 static NSMutableDictionary *authentifiedHosts;
 #endif
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 + (void)initialize
 {
     authentificationAttemptsHosts = [[NSMutableDictionary alloc] init];
@@ -86,7 +86,7 @@ static NSMutableDictionary *authentifiedHosts;
         || [path isEqualToString:@"/favicon.ico"]) {
         return NO;
     }
-    return [VLCKeychainCoordinator passcodeLockEnabled];
+    return [[VLCKeychainCoordinator passcodeService] hasSecret];
 }
 
 - (void)handleAuthenticationFailed
@@ -170,7 +170,7 @@ static NSMutableDictionary *authentifiedHosts;
     return [super expectsRequestBodyFromMethod:method atPath:path];
 }
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 - (int)authenticate:(NSString *)host
 {
     NSDictionary *params = [self parseGetParams];
@@ -272,7 +272,7 @@ static NSMutableDictionary *authentifiedHosts;
     NSError *error;
     NSURLRelationship relationship;
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
     NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
 #else
     NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
@@ -313,7 +313,7 @@ static NSMutableDictionary *authentifiedHosts;
     return dataResponse;
 }
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 - (NSObject<HTTPResponse> *)_httpGETLibraryForPath:(NSString *)path
 {
     NSString *filePath = [self filePathForURI:path];
@@ -372,7 +372,7 @@ static NSMutableDictionary *authentifiedHosts;
                         stringByReplacingOccurrencesOfString:@"'" withString:@"&#039;"];
 }
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 - (NSString *)createHTMLMediaObjectFromMedia:(VLCMLMedia *)media
 {
     return [NSString stringWithFormat:
@@ -439,7 +439,7 @@ static NSMutableDictionary *authentifiedHosts;
     NSString *deviceModel = [[UIDevice currentDevice] model];
     NSMutableArray *mediaInHtml = [[NSMutableArray alloc] initWithCapacity:media.count];
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
     for (NSObject <VLCMLObject> *mediaObject in media) {
         if ([mediaObject isKindOfClass:[VLCMLMedia class]]) {
             [mediaInHtml addObject:[self createHTMLMediaObjectFromMedia:(VLCMLMedia *)mediaObject]];
@@ -509,7 +509,7 @@ static NSMutableDictionary *authentifiedHosts;
     return fileResponse;
 }
 
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
 - (HTTPDynamicFileResponse *)generateXMLResponseFrom:(NSArray *)media path:(NSString *)path
 {
     NSMutableArray *mediaInXml = [[NSMutableArray alloc] initWithCapacity:media.count];
@@ -579,7 +579,7 @@ static NSMutableDictionary *authentifiedHosts;
 
 - (NSObject<HTTPResponse> *)_httpGETCSSForPath:(NSString *)path
 {
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
     NSDictionary *replacementDict = @{@"WEBINTF_TITLE" : _webInterfaceTitle};
 #else
     NSDictionary *replacementDict = @{@"WEBINTF_TITLE" : NSLocalizedString(@"WEBINTF_TITLE_ATV", nil)};
@@ -723,7 +723,7 @@ static NSMutableDictionary *authentifiedHosts;
     if ([path hasPrefix:@"/Thumbnail/"]) {
         return [self _httpGETThumbnailForPath:path];
     }
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
     if ([path hasPrefix:@"/public/auth.html"]) {
         return [self _httpGETAuthentification];
     }
@@ -828,6 +828,22 @@ static NSMutableDictionary *authentifiedHosts;
 //-----------------------------------------------------------------
 #pragma mark multipart form data parser delegate
 
+- (NSString *)_sanitizeFilePath:(NSString *)path {
+    NSArray *pathComponents = [path pathComponents];
+    NSMutableArray *validComponents = [NSMutableArray array];
+
+    for (NSString *component in pathComponents) {
+        if ([component isEqualToString:@".."] || [component isEqualToString:@"."]) {
+            // Skip "." and ".."
+            continue;
+        } else {
+            // Add valid component to the array
+            [validComponents addObject:component];
+        }
+    }
+
+    return [NSString pathWithComponents:validComponents];
+}
 
 - (void)processStartOfPartWithHeader:(MultipartMessageHeader*) header
 {
@@ -843,6 +859,9 @@ static NSMutableDictionary *authentifiedHosts;
         return;
     }
 
+    // make sure to exclude illegal characters
+    filename = [self _sanitizeFilePath:filename];
+
     // create the path where to store the media temporarily
     NSArray *searchPaths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     NSString *uploadDirPath = [searchPaths.firstObject
@@ -850,27 +869,31 @@ static NSMutableDictionary *authentifiedHosts;
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
     BOOL isDir = YES;
-    if (![fileManager fileExistsAtPath:uploadDirPath isDirectory:&isDir])
-        [fileManager createDirectoryAtPath:uploadDirPath withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![fileManager fileExistsAtPath:uploadDirPath isDirectory:&isDir]) {
+        NSError *error;
+        [fileManager createDirectoryAtPath:uploadDirPath withIntermediateDirectories:YES attributes:nil error:&error];
+        if (error != nil) {
+            APLog(@"Creating upload directory failed: %@", error.localizedDescription);
+        }
+    }
 
     _filepath = [uploadDirPath stringByAppendingPathComponent: filename];
 
-    NSNumber *freeSpace = [[UIDevice currentDevice] VLCFreeDiskSpace];
-    if (_contentLength >= freeSpace.longLongValue) {
-        /* avoid deadlock since we are on a background thread */
+    APLog(@"Saving file to %@", _filepath);
+    if (![fileManager createDirectoryAtPath:[_filepath stringByDeletingLastPathComponent]
+                withIntermediateDirectories:true attributes:nil error:nil]) {
+        APLog(@"Could not create directory at path: %@", _filepath);
         [self performSelectorOnMainThread:@selector(notifyUserAboutEndOfFreeStorage:) withObject:filename waitUntilDone:NO];
         [self handleResourceNotFound];
         [self stop];
-        return;
     }
 
-    APLog(@"Saving file to %@", _filepath);
-    if (![fileManager createDirectoryAtPath:[_filepath stringByDeletingLastPathComponent]
-                withIntermediateDirectories:true attributes:nil error:nil])
-        APLog(@"Could not create directory at path: %@", _filepath);
-
-    if (![fileManager createFileAtPath:_filepath contents:nil attributes:nil])
+    if (![fileManager createFileAtPath:_filepath contents:nil attributes:nil]) {
         APLog(@"Could not create file at path: %@", _filepath);
+        [self performSelectorOnMainThread:@selector(notifyUserAboutEndOfFreeStorage:) withObject:filename waitUntilDone:NO];
+        [self handleResourceNotFound];
+        [self stop];
+    }
 
     _storeFile = [NSFileHandle fileHandleForWritingAtPath:_filepath];
 
@@ -881,14 +904,7 @@ static NSMutableDictionary *authentifiedHosts;
 
 - (void)notifyUserAboutEndOfFreeStorage:(NSString *)filename
 {
-#if TARGET_OS_IOS
-    [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
-                                         errorMessage:[NSString stringWithFormat:
-                                                       NSLocalizedString(@"DISK_FULL_FORMAT", nil),
-                                                       filename,
-                                                       [[UIDevice currentDevice] model]]
-                                       viewController:[UIApplication sharedApplication].keyWindow.rootViewController];
-#else
+#if TARGET_OS_TV
     UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
                                                                              message:[NSString stringWithFormat:
                                                                                       NSLocalizedString(@"DISK_FULL_FORMAT", nil),
@@ -899,6 +915,13 @@ static NSMutableDictionary *authentifiedHosts;
                                                         style:UIAlertActionStyleCancel
                                                       handler:nil]];
     [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:alertController animated:YES completion:nil];
+#else
+    [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
+                                         errorMessage:[NSString stringWithFormat:
+                                                       NSLocalizedString(@"DISK_FULL_FORMAT", nil),
+                                                       filename,
+                                                       [[UIDevice currentDevice] model]]
+                                       viewController:[(VLCAppDelegate *)[UIApplication sharedApplication].delegate window].rootViewController];
 #endif
 }
 
@@ -908,7 +931,7 @@ static NSMutableDictionary *authentifiedHosts;
     if (_storeFile) {
         @try {
             [_storeFile writeData:data];
-#if TARGET_OS_IOS
+#if TARGET_OS_IOS || TARGET_OS_VISION
             [_httpUploaderController resetIdleTimer];
 #endif
         }

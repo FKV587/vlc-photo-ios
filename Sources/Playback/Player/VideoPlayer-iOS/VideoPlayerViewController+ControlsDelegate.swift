@@ -15,6 +15,7 @@
 
 extension VideoPlayerViewController: VideoPlayerControlsDelegate {
     func videoPlayerControlsDelegateDidTapSubtitle(_ videoPlayerControls: VideoPlayerControls) {
+#if os(iOS)
         let orientation = getInterfaceOrientationMask(orientation: UIApplication.shared.statusBarOrientation)
 
         titleSelectionView.mainStackView.axis = orientation == .landscape ? .horizontal : .vertical
@@ -38,9 +39,18 @@ extension VideoPlayerViewController: VideoPlayerControlsDelegate {
             present(subtitleCastWarningAlert, animated: true)
             return
         }
+#else
+        titleSelectionView.mainStackView.axis = .horizontal
+        titleSelectionView.mainStackView.distribution = .fillEqually
+
+        titleSelectionView.updateHeightConstraints()
+        titleSelectionView.reload()
+
+        view.bringSubviewToFront(titleSelectionView)
+#endif
         titleSelectionView.isHidden = !titleSelectionView.isHidden
     }
-    
+
     func videoPlayerControlsDelegateRepeat(_ videoPlayerControls: VideoPlayerControls) {
         playbackService.toggleRepeatMode()
         self.playModeUpdated()
@@ -62,6 +72,7 @@ extension VideoPlayerViewController: VideoPlayerControlsDelegate {
         }
     }
 
+#if os(iOS)
     func videoPlayerControlsDelegateDidTapRotationLock(_ videoPlayerControls: VideoPlayerControls) {
         let mask = getInterfaceOrientationMask(orientation: UIApplication.shared.statusBarOrientation)
 
@@ -73,9 +84,16 @@ extension VideoPlayerViewController: VideoPlayerControlsDelegate {
             videoPlayerControls.rotationLockButton.tintColor = .white
         }
     }
+#else
+    func videoPlayerControlsDelegateDidTapRotationLock(_ videoPlayerControls: VideoPlayerControls) {
+    }
+#endif
 
     func videoPlayerControlsDelegateDidTapBackward(_ videoPlayerControls: VideoPlayerControls) {
-        jumpBackwards(seekBackwardBy)
+        totalSeekDuration = previousSeekState == .forward ? -seekBackwardBy : totalSeekDuration - seekBackwardBy
+        previousSeekState = .backward
+
+        displayAndApplySeekDuration(seekBackwardBy)
     }
 
     func videoPlayerControlsDelegateDidTapPreviousMedia(_ videoPlayerControls: VideoPlayerControls) {
@@ -95,8 +113,11 @@ extension VideoPlayerViewController: VideoPlayerControlsDelegate {
         playbackService.next()
     }
 
-    func videoPlayerControlsDelegateDidTapForeward(_ videoPlayerControls: VideoPlayerControls) {
-        jumpForwards(seekForwardBy)
+    func videoPlayerControlsDelegateDidTapForward(_ videoPlayerControls: VideoPlayerControls) {
+        totalSeekDuration = previousSeekState == .backward ? seekForwardBy : totalSeekDuration + seekForwardBy
+        previousSeekState = .forward
+
+        displayAndApplySeekDuration(seekForwardBy)
     }
 
     func videoPlayerControlsDelegateDidTapAspectRatio(_ videoPlayerControls: VideoPlayerControls) {

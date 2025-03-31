@@ -12,6 +12,7 @@
  *          Vincent L. Cone <vincent.l.cone # tuta.io>
  *          Carola Nitz <caro # videolan.org>
  *          Diogo Simao Marques <dogo@videolabs.io>
+ *          Eshan Singh <eeeshan789@gmail.com>
  *
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
@@ -40,10 +41,12 @@
 
 #import "VLCWiFiUploadTableViewCell.h"
 
+#if TARGET_OS_IOS
 #import "VLCBoxController.h"
 #import <OneDriveSDK.h>
 #import "VLCOneDriveConstants.h"
 #import "VLCDropboxConstants.h"
+#endif
 
 #import "VLC-Swift.h"
 
@@ -60,6 +63,7 @@
     NSLayoutConstraint* _localNetworkHeight;
     NSLayoutConstraint* _remoteNetworkHeight;
     MediaLibraryService *_medialibraryService;
+    UIDocumentPickerViewController *_documentPicker;
 }
 
 @end
@@ -106,16 +110,20 @@
     [self.view addSubview:_scrollView];
 
     [NSLayoutConstraint activateConstraints:@[
-                                              [_scrollView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
-                                              [_scrollView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
-                                              [_scrollView.topAnchor constraintEqualToAnchor:self.topLayoutGuide.bottomAnchor],
-                                              [_scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-                                              ]];
+        [_scrollView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
+        [_scrollView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
+        [_scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [_scrollView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    ]];
 
     _remoteNetworkDataSourceAndDelegate = [VLCRemoteNetworkDataSourceAndDelegate new];
     _remoteNetworkDataSourceAndDelegate.delegate = self;
 
+#if TARGET_OS_VISION
+    CGRect screenDimensions = [[[[UIApplication sharedApplication] delegate] window] bounds];
+#else
     CGRect screenDimensions = [UIScreen mainScreen].bounds;
+#endif
 
     _localNetworkTableView = [[UITableView alloc] initWithFrame:screenDimensions style:UITableViewStylePlain];
     _localNetworkTableView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -153,7 +161,12 @@
     [_refreshControl addTarget:self action:@selector(handleRefresh) forControlEvents:UIControlEventValueChanged];
     [_localNetworkTableView addSubview:_refreshControl];
 
+#if TARGET_OS_VISION
+    _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    _activityIndicator.color = [UIColor whiteColor];
+#else
     _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+#endif
     _activityIndicator.center = _localNetworkTableView.center;
     _activityIndicator.autoresizingMask = UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin;
     _activityIndicator.hidesWhenStopped = YES;
@@ -167,25 +180,25 @@
     _remoteNetworkHeight = [_remoteNetworkTableView.heightAnchor constraintEqualToConstant:_remoteNetworkTableView.contentSize.height];
 
     [NSLayoutConstraint activateConstraints:@[
-                                              [_remoteNetworkTableView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
-                                              [_remoteNetworkTableView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
-                                              [_remoteNetworkTableView.topAnchor constraintEqualToAnchor:_scrollView.topAnchor],
-                                              [fileServerView.topAnchor constraintEqualToAnchor:_remoteNetworkTableView.bottomAnchor],
-                                              [fileServerView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
-                                              [fileServerView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
-                                              [_localNetworkTableView.topAnchor constraintEqualToAnchor:fileServerView.bottomAnchor],
-                                              [_localNetworkTableView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
-                                              [_localNetworkTableView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
-                                              [_localNetworkTableView.bottomAnchor constraintEqualToAnchor:_scrollView.bottomAnchor],
-                                              _localNetworkHeight,
-                                              _remoteNetworkHeight
-                                              ]];
+        [_remoteNetworkTableView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
+        [_remoteNetworkTableView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
+        [_remoteNetworkTableView.topAnchor constraintEqualToAnchor:_scrollView.topAnchor],
+        [fileServerView.topAnchor constraintEqualToAnchor:_remoteNetworkTableView.bottomAnchor],
+        [fileServerView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
+        [fileServerView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
+        [_localNetworkTableView.topAnchor constraintEqualToAnchor:fileServerView.bottomAnchor],
+        [_localNetworkTableView.leftAnchor constraintEqualToAnchor:self.view.leftAnchor],
+        [_localNetworkTableView.rightAnchor constraintEqualToAnchor:self.view.rightAnchor],
+        [_localNetworkTableView.bottomAnchor constraintEqualToAnchor:_scrollView.bottomAnchor],
+        _localNetworkHeight,
+        _remoteNetworkHeight
+    ]];
 }
 
 - (void)setupUI
 {
-    self.title = NSLocalizedString(@"NETWORK", nil);
-    self.tabBarItem = [[UITabBarItem alloc] initWithTitle: NSLocalizedString(@"NETWORK", nil)
+    self.title = NSLocalizedString(@"BROWSE", nil);
+    self.tabBarItem = [[UITabBarItem alloc] initWithTitle: NSLocalizedString(@"BROWSE", nil)
                                                     image: [UIImage imageNamed:@"Network"]
                                             selectedImage: [UIImage imageNamed:@"Network"]];
     self.tabBarItem.accessibilityIdentifier = VLCAccessibilityIdentifier.localNetwork;
@@ -206,11 +219,13 @@
     if (@available(iOS 11.0, *)) {
         self.navigationController.navigationBar.prefersLargeTitles = NO;
     }
-    
+
     NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
     [notificationCenter addObserver:self selector:@selector(themeDidChange) name:kVLCThemeDidChangeNotification object:nil];
     [notificationCenter addObserver:self selector:@selector(contentSizeDidChange) name:UIContentSizeCategoryDidChangeNotification object:nil];
+#if TARGET_OS_IOS
     [notificationCenter addObserver:self selector:@selector(boxSessionUpdated) name:VLCBoxControllerSessionUpdated object:nil];
+#endif
     [notificationCenter addObserver:self selector:@selector(miniPlayerIsShown)
                                name:VLCPlayerDisplayControllerDisplayMiniPlayer object:nil];
     [notificationCenter addObserver:self selector:@selector(miniPlayerIsHidden)
@@ -218,18 +233,20 @@
 
     [self themeDidChange];
     NSArray *browserClasses = @[
-                                [VLCLocalNetworkServiceBrowserUPnP class],
-                                [VLCLocalNetworkServiceBrowserPlex class],
-                                [VLCLocalNetworkServiceBrowserHTTP class],
-                                [VLCLocalNetworkServiceBrowserDSM class],
-                                [VLCLocalNetworkServiceBrowserBonjour class],
-                                [VLCLocalNetworkServiceBrowserNFS class],
-                                ];
+        [VLCLocalNetworkServiceBrowserUPnP class],
+        [VLCLocalNetworkServiceBrowserPlex class],
+        [VLCLocalNetworkServiceBrowserHTTP class],
+        [VLCLocalNetworkServiceBrowserDSM class],
+        [VLCLocalNetworkServiceBrowserBonjour class],
+        [VLCLocalNetworkServiceBrowserNFS class],
+    ];
 
     _discoveryController = [[VLCLocalServerDiscoveryController alloc] initWithServiceBrowserClasses:browserClasses];
     _discoveryController.delegate = self;
 
+#if TARGET_OS_IOS
     [self configureCloudControllers];
+#endif
 }
 
 - (void)viewWillDisappear:(BOOL)animated
@@ -255,6 +272,7 @@
 {
     _remoteNetworkHeight.constant = _remoteNetworkTableView.contentSize.height;
     _localNetworkHeight.constant = _localNetworkTableView.contentSize.height;
+    [super viewDidAppear:animated];
 }
 
 - (void)miniPlayerIsShown
@@ -268,6 +286,7 @@
     _localNetworkTableView.contentInset = UIEdgeInsetsMake(0, 0, 0, 0);
 }
 
+#if TARGET_OS_IOS
 - (BOOL)shouldAutorotate
 {
     UIInterfaceOrientation toInterfaceOrientation = [[UIApplication sharedApplication] statusBarOrientation];
@@ -275,6 +294,7 @@
         return NO;
     return YES;
 }
+#endif
 
 - (void)contentSizeDidChange
 {
@@ -299,6 +319,7 @@
         loginViewController.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"BUTTON_CANCEL", nil) style:UIBarButtonItemStylePlain target:self action:@selector(_dismissLogin)];
 }
 
+#if TARGET_OS_IOS
 - (void)configureCloudControllers
 {
     VLCBoxController *boxController = [VLCBoxController sharedInstance];
@@ -307,10 +328,16 @@
 
     // Configure Dropbox
     [DBClientsManager setupWithAppKey:kVLCDropboxAppKey];
+    [DBClientsManager authorizedClient];
 
     // Configure OneDrive
     [ODClient setMicrosoftAccountAppId:kVLCOneDriveClientID scopes:@[@"onedrive.readwrite", @"offline_access"]];
+
+    VLCPCloudController  *controller = [VLCPCloudController pCloudInstance];
+    // Start P Cloud session on init to check whether it is logged in or not as soon as possible
+    [controller startSession];
 }
+#endif
 
 - (void)boxSessionUpdated
 {
@@ -400,7 +427,12 @@
 
     /* UPnP does not support authentication, so skip this step */
     if ([login.protocolIdentifier isEqualToString:VLCNetworkServerProtocolIdentifierUPnP]) {
-        VLCNetworkServerBrowserVLCMedia *serverBrowser = [VLCNetworkServerBrowserVLCMedia UPnPNetworkServerBrowserWithLogin:login];
+        VLCNetworkServerBrowserVLCMedia *serverBrowser;
+        if (login.rootMedia != nil) {
+            serverBrowser = [[VLCNetworkServerBrowserVLCMedia alloc] initWithMedia:login.rootMedia options:login.options];
+        } else {
+            serverBrowser = [VLCNetworkServerBrowserVLCMedia UPnPNetworkServerBrowserWithLogin:login];
+        }
         VLCNetworkServerBrowserViewController *vc = [[VLCNetworkServerBrowserViewController alloc]
                                                      initWithServerBrowser:serverBrowser
                                                      medialibraryService:_medialibraryService];
@@ -408,13 +440,19 @@
         return;
     }
 
-    [login loadLoginInformationFromKeychainWithError:nil];
+    NSError *error = nil;
+    if (![login loadLoginInformationFromKeychainWithError:&error]) {
+        [self showKeychainLoadError:error forLogin:login];
+        return;
+    }
 
     VLCNetworkLoginViewController *loginViewController = [[VLCNetworkLoginViewController alloc] initWithNibName:@"VLCNetworkLoginViewController" bundle:nil];
 
     loginViewController.loginInformation = login;
     loginViewController.delegate = self;
+#if TARGET_OS_IOS
     if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+#endif
         UINavigationController *navCon = [[UINavigationController alloc] initWithRootViewController:loginViewController];
         navCon.navigationBarHidden = NO;
         navCon.modalPresentationStyle = UIModalPresentationFormSheet;
@@ -427,9 +465,11 @@
                                                                     target:self
                                                                     action:@selector(_dismissLogin)];
         }
+#if TARGET_OS_IOS
     } else {
         [self.navigationController pushViewController:loginViewController animated:YES];
     }
+#endif
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(nonnull NSIndexPath *)indexPath
@@ -455,6 +495,18 @@
     }
 }
 
+- (void)showKeychainLoadError:(NSError *)error forLogin:(VLCNetworkServerLoginInformation *)login
+{
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:error.localizedDescription
+                                                                             message:error.localizedFailureReason preferredStyle:UIAlertControllerStyleAlert];
+    [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_OK", nil)
+                                                        style:UIAlertActionStyleDefault
+                                                      handler:^(UIAlertAction * _Nonnull action) {
+        [self connectToServer];
+    }]];
+    [self presentViewController:alertController animated:YES completion:nil];
+}
+
 - (void)showViewController:(UIViewController *)viewController
 {
     [self.navigationController pushViewController:viewController animated:YES];
@@ -462,8 +514,14 @@
 
 - (void)showDocumentPickerViewController:(UIDocumentPickerViewController *)viewControllerToPresent
 {
-    viewControllerToPresent.delegate = self;
-    [self presentViewController:viewControllerToPresent animated:YES completion:nil];
+    _documentPicker = viewControllerToPresent;
+    _documentPicker.delegate = self;
+
+    if (@available(iOS 11.0, *)) {
+        _documentPicker.allowsMultipleSelection = YES;
+    }
+
+    [self presentViewController:_documentPicker animated:YES completion:nil];
 }
 
 - (void)reloadRemoteTableView
@@ -488,7 +546,9 @@
         self.navigationController.navigationBar.standardAppearance = navigationBarAppearance;
         self.navigationController.navigationBar.scrollEdgeAppearance = navigationBarAppearance;
     }
+#if TARGET_OS_IOS
     [self setNeedsStatusBarAppearanceUpdate];
+#endif
 }
 
 - (void)_dismissLogin
@@ -500,10 +560,12 @@
     }
 }
 
+#if TARGET_OS_IOS
 - (UIStatusBarStyle)preferredStatusBarStyle
 {
     return PresentationTheme.current.colors.statusBarStyle;
 }
+#endif
 
 #pragma mark - Refresh
 
@@ -556,13 +618,28 @@
 
 - (void)discoveryFoundSomethingNew
 {
-    [_localNetworkTableView reloadData];
-    [_localNetworkTableView layoutIfNeeded];
-    _localNetworkHeight.constant = _localNetworkTableView.contentSize.height;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_localNetworkTableView reloadData];
+        [self->_localNetworkTableView layoutIfNeeded];
+        self->_localNetworkHeight.constant = self->_localNetworkTableView.contentSize.height;
+    });
+}
+
+-(void)showEmptyMediaListAlert
+{
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"EMPTY_MEDIA_LIST", "")
+                                                                             message:NSLocalizedString(@"EMPTY_MEDIA_LIST_DESCRIPTION", "")
+                                                                      preferredStyle:UIAlertControllerStyleAlert];
+
+    UIAlertAction *dismissAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"BUTTON_DISMISS", "") style:UIAlertActionStyleCancel handler:nil];
+
+    [alertController addAction:dismissAction];
+    [self presentViewController:alertController animated:YES completion:nil];
 }
 
 #pragma mark - UIDocumentPickerDelegate
 
+#if TARGET_OS_IOS
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url
 {
     if (url && [url startAccessingSecurityScopedResource]) {
@@ -570,6 +647,56 @@
         [medialist addMedia:[VLCMedia mediaWithURL:url]];
         [[VLCPlaybackService sharedInstance] playMediaList:medialist firstIndex:0 subtitlesFilePath:nil];
         [[VLCPlaybackService sharedInstance].openedLocalURLs addObject:url];
+    }
+}
+#endif
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
+{
+    if (urls.count > 0) {
+        VLCMediaList *medialist = [[VLCMediaList alloc] init];
+
+        if (urls.count == 1 && [[urls[0] pathExtension] isEqualToString:@""]) {
+            [self getFolderData:urls[0] mediaList:medialist];
+        } else {
+            for (NSURL *url in urls) {
+                NSString *pathExtension = [url pathExtension];
+                if (![pathExtension isEqualToString:@""]) {
+                    if (url && [url startAccessingSecurityScopedResource]) {
+                        [medialist addMedia:[VLCMedia mediaWithURL:url]];
+                        [[VLCPlaybackService sharedInstance].openedLocalURLs addObject:url];
+                    }
+                }
+            }
+        }
+
+        if ([medialist count] > 0) {
+            [[VLCPlaybackService sharedInstance] playMediaList:medialist firstIndex:0 subtitlesFilePath:nil];
+        } else {
+            [self showEmptyMediaListAlert];
+        }
+    }
+}
+
+-(void)getFolderData:(NSURL*)url mediaList:(VLCMediaList*) list
+{
+    NSURL *folderURL = url;
+    NSError *error = nil;
+    [url startAccessingSecurityScopedResource];
+    NSArray<NSURL *> *filesInFolder = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:folderURL
+                                                                    includingPropertiesForKeys:@[]
+                                                                                       options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                                                         error:&error];
+    if (error) {
+        NSLog(@"Error reading directory: %@", error);
+        return;
+    }
+
+    for (NSURL *fileURL in filesInFolder) {
+        if (![fileURL.pathExtension isEqual:@""]) {
+            [list addMedia:[VLCMedia mediaWithURL:fileURL]];
+            [[VLCPlaybackService sharedInstance].openedLocalURLs addObject:fileURL];
+        }
     }
 }
 

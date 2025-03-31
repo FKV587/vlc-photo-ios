@@ -31,7 +31,7 @@
     [VLCAppearanceManager setupAppearanceWithTheme:PresentationTheme.current];
 
     UIWindow *window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-    window.rootViewController = [UITabBarController new];
+    window.rootViewController = [VLCBottomTabBarController new];
     [window makeKeyAndVisible];
 
     [VLCAppearanceManager setupUserInterfaceStyleWithTheme:PresentationTheme.current];
@@ -73,6 +73,9 @@
 
 - (void)sceneDidEnterBackground:(UIScene *)scene
 {
+    UIApplication *sharedApplication = [UIApplication sharedApplication];
+    VLCAppDelegate *appDelegate = (VLCAppDelegate *)sharedApplication.delegate;
+    [appDelegate applicationWillTerminate:sharedApplication];
 }
 
 - (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts

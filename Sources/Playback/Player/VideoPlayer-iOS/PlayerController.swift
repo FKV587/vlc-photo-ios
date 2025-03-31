@@ -64,6 +64,10 @@ class PlayerController: NSObject {
         return UserDefaults.standard.bool(forKey: kVLCSettingCloseGesture)
     }
 
+    var isSpeedUpGestureEnabled: Bool {
+        return UserDefaults.standard.bool(forKey: kVLCSettingPlaybackLongTouchSpeedUp)
+    }
+
     var isShuffleEnabled: Bool {
         return UserDefaults.standard.bool(forKey: kVLCPlayerIsShuffleEnabled)
     }
@@ -78,6 +82,9 @@ class PlayerController: NSObject {
         return UserDefaults.standard.bool(forKey: kVLCPlayerShouldRememberState)
     }
 
+    var isRememberBrightnessEnabled: Bool {
+        return UserDefaults.standard.bool(forKey: kVLCPlayerShouldRememberBrightness)
+    }
 
     @objc override init() {
         super.init()
@@ -92,6 +99,7 @@ class PlayerController: NSObject {
         let notificationCenter = NotificationCenter.default
 
         // External Screen
+#if os(iOS)
         if #available(iOS 13.0, *) {
             notificationCenter.addObserver(self,
                                            selector: #selector(handleExternalScreenDidConnect),
@@ -111,6 +119,16 @@ class PlayerController: NSObject {
                                            name: UIScreen.didDisconnectNotification,
                                            object: nil)
         }
+#else
+        notificationCenter.addObserver(self,
+                                       selector: #selector(handleExternalScreenDidConnect),
+                                       name: NSNotification.Name(rawValue: VLCNonInteractiveWindowSceneBecameActive),
+                                       object: nil)
+        notificationCenter.addObserver(self,
+                                       selector: #selector(handleExternalScreenDidDisconnect),
+                                       name: NSNotification.Name(rawValue: VLCNonInteractiveWindowSceneDisconnected),
+                                       object: nil)
+#endif
         // UIApplication
         notificationCenter.addObserver(self,
                                        selector: #selector(handleAppBecameActive),

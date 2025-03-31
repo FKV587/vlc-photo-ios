@@ -59,7 +59,7 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
     var isEditing: Bool = false
     var isMediaBeingPlayed: Bool = false
     var backupThumbnail: UIImage? = nil
-
+    var lastPlayed: Bool = false
     weak var delegate: MediaCollectionViewCellDelegate?
 
     override var media: VLCMLObject? {
@@ -101,7 +101,7 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
     override var isSelected: Bool {
         didSet {
             checkboxImageView.image = isSelected ? UIImage(named: "checkboxSelected")
-                : UIImage(named: "checkboxEmpty")
+            : UIImage(named: "checkboxEmpty")
         }
     }
 
@@ -113,9 +113,7 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
 
     override func awakeFromNib() {
         super.awakeFromNib()
-        if #available(iOS 11.0, *) {
-            thumbnailView.accessibilityIgnoresInvertColors = true
-        }
+        thumbnailView.accessibilityIgnoresInvertColors = true
 
         newLabel.text = NSLocalizedString("NEW", comment: "")
         newLabel.textColor = PresentationTheme.current.colors.orangeUI
@@ -213,8 +211,6 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        scrollView.isScrollEnabled = isMediaBeingPlayed ? false : true
-
         if scrollView.contentOffset.x < 0 {
             scrollView.contentOffset.x = 0
             hasXGoneNegative = true
@@ -226,12 +222,11 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         }
 
         if scrollView.contentOffset.x >= deleteButton.frame.size.width + 30 {
-            if #available(iOS 10.0, *), !vibrationTriggered {
-                let impactFeedbackGenerator = UIImpactFeedbackGenerator(style: .light)
-                impactFeedbackGenerator.prepare()
-                impactFeedbackGenerator.impactOccurred()
-            }
-
+#if os(iOS)
+            let impactFeedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+            impactFeedbackGenerator.prepare()
+            impactFeedbackGenerator.impactOccurred()
+#endif
             vibrationTriggered = true
             scrollContentView.isHidden = true
         } else {
@@ -308,6 +303,9 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         } else {
             colors = PresentationTheme.current.colors
             newLabel.isHidden = !audiotrack.isNew
+            if audiotrack.isNew {
+                setMediaNew()
+            }
         }
 
         titleLabel.textColor = isMediaBeingPlayed ? colors.orangeUI : colors.cellTextColor
@@ -321,6 +319,10 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         dynamicFontSizeChange()
 
         scrollView.isScrollEnabled = true
+
+        if lastPlayed {
+            handleLastPlayed()
+        }
 
         updateSizeDescriptionLabelConstraint()
         updateLabelsViewContraint()
@@ -368,7 +370,9 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         thumbnailView.layer.cornerRadius = thumbnailView.frame.size.width / 2.0
         titleLabel.text = artist.artistName()
         accessibilityLabel = artist.accessibilityText()
-        sizeDescriptionLabel.text = artist.numberOfTracksString()
+        let numberOfAlbums = artist.albumsCount()
+        sizeDescriptionLabel.text = numberOfAlbums == 0 ? artist.numberOfTracksString() :
+        String(format: "%@ · %@", artist.numberOfAlbumsString(), artist.numberOfTracksString())
         thumbnailView.image = artist.thumbnail()
         scrollView.isScrollEnabled = false
         updateSizeDescriptionLabelConstraint()
@@ -380,6 +384,15 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         thumbnailView.layer.cornerRadius = 3
         thumbnailView.image = movie.thumbnailImage()
         newLabel.isHidden = !movie.isNew
+
+        if movie.isNew {
+            setMediaNew()
+        }
+
+        if lastPlayed {
+            handleLastPlayed()
+        }
+
         if isEditing {
             sizeDescriptionLabel.text = String(format: "%@ · %@", movie.mediaDuration(), movie.formatSize())
         } else {
@@ -391,8 +404,16 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         updateLabelsViewContraint()
     }
 
+    // Indicating the currentlyPlayingMedia value when choosing actions like "play," "play next in queue," and "append to queue" is necessary because the playbackService.isPlaying value doesn't update immediately.
+    // This delay causes the reloadData() call to be ineffective in hiding the last played label.
     func update(playlist: VLCMLPlaylist) {
-        newLabel.isHidden = true
+        if lastPlayed {
+            handleLastPlayed()
+        } else {
+            newLabel.isHidden = true
+            dragIndicatorImageView.isHidden = false
+        }
+
         titleLabel.text = playlist.name
         accessibilityLabel = playlist.accessibilityText()
         sizeDescriptionLabel.text = playlist.numberOfTracksString() + " · " + playlist.durationString()
@@ -400,7 +421,6 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         thumbnailView.image = playlist.thumbnail()
         dragIndicatorImageView.image = UIImage(named: "disclosureChevron")
         dragIndicatorImageView.tintColor = PresentationTheme.current.colors.orangeUI
-        dragIndicatorImageView.isHidden = false
         scrollView.isScrollEnabled = true
         updateSizeDescriptionLabelConstraint()
     }
@@ -459,6 +479,7 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         super.prepareForReuse()
         NotificationCenter.default.removeObserver(self, name: NSNotification.Name(rawValue: VLCPlaybackServicePlaybackDidResume), object: nil)
         isEditing = false
+        lastPlayed = false
         ignoreThemeDidChange = false
         titleLabel.text = ""
         titleLabel.labelize = enableMarquee
@@ -522,7 +543,7 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
     }
 
     @objc fileprivate func dynamicFontSizeChange() {
-        newLabel.font = UIFont.preferredCustomFont(forTextStyle: .subheadline).bolded
+        newLabel.font = UIFont.preferredCustomFont(forTextStyle: .footnote).semibolded
         titleLabel.font = isMediaBeingPlayed ? UIFont.preferredFont(forTextStyle: .title3).bolded : UIFont.preferredFont(forTextStyle: .title3)
         sizeDescriptionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
     }
@@ -591,5 +612,25 @@ class MediaCollectionViewCell: BaseCollectionViewCell, UIScrollViewDelegate {
         let subtitleHeight = UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
 
         return CGSize(width: cellWidth, height: titleHeight + subtitleHeight + edgePadding + interItemPadding * 2)
+    }
+
+    // MARK: - Handle  New label Text
+
+    func handleLastPlayed() {
+        let isCurrentlyPlayingPlaylist = UserDefaults.standard.bool(forKey: kVLCIsCurrentlyPlayingPlaylist)
+        let shouldDisplayLastPlayedLabel = (!playbackService.isPlaying && playbackService.currentlyPlayingMedia == nil) || !isCurrentlyPlayingPlaylist
+        newLabel.isHidden = !shouldDisplayLastPlayedLabel
+
+        if media is VLCMLPlaylist {
+            dragIndicatorImageView.isHidden = shouldDisplayLastPlayedLabel
+        } else {
+            dragIndicatorImageView.isHidden = true
+        }
+
+        newLabel.text = NSLocalizedString("LAST_PLAYED_PLAYLIST_LABEL_TITLE", comment: "")
+    }
+
+    func setMediaNew() {
+        newLabel.text = NSLocalizedString("NEW", comment: "")
     }
 }

@@ -17,16 +17,13 @@
 #import "VLCPlaybackService.h"
 #import "VLC-Swift.h"
 
-#if TARGET_OS_IOS
 @interface VLCBoxTableViewController () <VLCCloudStorageTableViewCell, BoxAuthorizationViewControllerDelegate, VLCCloudStorageDelegate, NSURLConnectionDataDelegate>
-#else
-@interface VLCBoxTableViewController () <VLCCloudStorageTableViewCell, VLCCloudStorageDelegate, NSURLConnectionDataDelegate>
-#endif
 {
     BoxFile *_selectedFile;
     VLCBoxController *_boxController;
     NSArray *_listOfFiles;
     NSString *_currentFileName;
+    NSString *_initialPath;
 }
 
 @end
@@ -47,19 +44,17 @@
     [super viewDidLoad];
 
     _boxController = [VLCBoxController sharedInstance];
+    _initialPath = self.currentPath;
+    
     self.controller = _boxController;
     self.controller.delegate = self;
 
-#if TARGET_OS_IOS
     self.navigationItem.titleView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"BoxCell"]];
 
     [self.cloudStorageLogo setImage:[UIImage imageNamed:@"box"]];
 
     [self.cloudStorageLogo sizeToFit];
     self.cloudStorageLogo.center = self.view.center;
-#else
-    self.title = @"Box";
-#endif
 
     // Handle logged in
     NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
@@ -73,7 +68,6 @@
                           name:BoxOAuth2SessionDidBecomeAuthenticatedNotification
                         object:[BoxSDK sharedSDK].OAuth2Session];
 
-#if TARGET_OS_IOS
     // Handle logout
     [defaultCenter addObserver:self
                       selector:@selector(boxDidGetLoggedOut)
@@ -92,10 +86,8 @@
                       selector:@selector(boxAPIInitiateLogin)
                           name:BoxOAuth2SessionDidReceiveRefreshErrorNotification
                         object:[BoxSDK sharedSDK].OAuth2Session];
-#endif
 }
 
-#if TARGET_OS_IOS
 - (UIViewController *)createAuthController
 {
     NSURL *authorizationURL = [[BoxSDK sharedSDK].OAuth2Session authorizeURL];
@@ -104,7 +96,6 @@
     authorizationController.delegate = self;
     return authorizationController;
 }
-#endif
 
 - (void)viewWillAppear:(BOOL)animated
 {
@@ -171,6 +162,12 @@
 
 - (void)goBack
 {
+    // We return if we are viewing favorites.
+    if ([self.currentPath isEqualToString: _initialPath]) {
+        [self.navigationController popViewControllerAnimated:YES];
+        return;
+    }
+    
     // When the user is logged in, the root directory can have both an empty value or a '0' as its ID.
     // The current path is nil otherwise.
     if ([self.currentPath isEqualToString:@""] || [self.currentPath isEqualToString:@"0"] || !self.currentPath) {
@@ -242,35 +239,26 @@
     return request;
 }
 
-#if TARGET_OS_IOS
 - (void)triggerDownloadForCell:(VLCCloudStorageTableViewCell *)cell
 {
     _selectedFile = _listOfFiles[[self.tableView indexPathForCell:cell].row];
 
-    if (_selectedFile.size.longLongValue < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        /* selected item is a proper file, ask the user if s/he wants to download it */
-        NSArray<VLCAlertButton *> *buttonsAction = @[[[VLCAlertButton alloc] initWithTitle: NSLocalizedString(@"BUTTON_CANCEL", nil)
-                                                                                     style: UIAlertActionStyleCancel
-                                                                                    action: ^(UIAlertAction *action) {
-                                                                                        self->_selectedFile = nil;
-                                                                                    }],
-                                                     [[VLCAlertButton alloc] initWithTitle:NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
-                                                                                    action:^(UIAlertAction *action) {
-                                                                                        [self->_boxController downloadFileToDocumentFolder:self->_selectedFile];
-                                                                                        self->_selectedFile = nil;
-                                                                                    }]];
-        [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
-                                             errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
-                                           viewController:self
-                                            buttonsAction:buttonsAction];
-    } else {
-        [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
-                                             errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
-                                           viewController:self];
-    }
+    /* selected item is a proper file, ask the user if s/he wants to download it */
+    NSArray<VLCAlertButton *> *buttonsAction = @[[[VLCAlertButton alloc] initWithTitle: NSLocalizedString(@"BUTTON_CANCEL", nil)
+                                                                                 style: UIAlertActionStyleCancel
+                                                                                action: ^(UIAlertAction *action) {
+        self->_selectedFile = nil;
+    }],
+                                                 [[VLCAlertButton alloc] initWithTitle:NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
+                                                                                action:^(UIAlertAction *action) {
+                                                     [self->_boxController downloadFileToDocumentFolder:self->_selectedFile];
+                                                     self->_selectedFile = nil;
+                                                 }]];
+    [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
+                                         errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
+                                       viewController:self
+                                        buttonsAction:buttonsAction];
 }
-
-#endif
 
 #pragma mark - box controller delegate
 
@@ -296,7 +284,6 @@
     [self requestInformationForCurrentPath];
 }
 
-#if TARGET_OS_IOS
 - (BOOL)authorizationViewController:(BoxAuthorizationViewController *)authorizationViewController shouldLoadReceivedOAuth2RedirectRequest:(NSURLRequest *)request
 {
     [[BoxSDK sharedSDK].OAuth2Session performAuthorizationCodeGrantWithReceivedURL:request.URL];
@@ -333,7 +320,6 @@
 {
     [self.navigationController popViewControllerAnimated:YES];
 }
-#endif
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView
 {
@@ -348,7 +334,6 @@
 }
 #pragma mark - login dialog
 
-#if TARGET_OS_IOS
 - (IBAction)loginAction:(id)sender
 {
     if (![_boxController isAuthorized]) {
@@ -358,6 +343,23 @@
         [_boxController logout];
     }
 }
-#endif
+
+- (void)triggerFavoriteForCell:(VLCCloudStorageTableViewCell *)cell 
+{
+    NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
+    VLCFavoriteService *service = [VLCAppCoordinator sharedInstance].favoriteService;
+    BoxFile *file = _listOfFiles[indexPath.row];
+
+    VLCFavorite *fav = [[VLCFavorite alloc] init];
+    fav.userVisibleName = file.name;
+    fav.url = [NSURL URLWithString:[NSString stringWithFormat:@"file://Box/%@", file.modelID]];
+
+    if (cell.isFavourite) {
+        [service addFavorite:fav];
+    } else {
+        [service removeFavorite:fav];
+    }
+}
+
 
 @end

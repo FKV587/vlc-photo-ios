@@ -19,6 +19,7 @@
 #import "VLCNetworkServerBrowserVLCMedia+SFTP.h"
 
 #import "VLCLocalNetworkServiceBrowserManualConnect.h"
+#import "VLCLocalNetworkServiceBrowserFavorites.h"
 #import "VLCLocalNetworkServiceBrowserPlex.h"
 #import "VLCLocalNetworkServiceBrowserUPnP.h"
 #import "VLCLocalNetworkServiceBrowserNFS.h"
@@ -32,9 +33,39 @@
 
 #import "VLC-Swift.h"
 
+@interface AlertControllerWithMessageHeight : UIAlertController
+@end
+
+@implementation AlertControllerWithMessageHeight
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self adjustMessageConstraint];
+}
+
+- (void)adjustMessageConstraint {
+    [self traverseAndAdjust:self.view];
+}
+
+- (void)traverseAndAdjust:(UIView *)view {
+    for (UIView *subview in view.subviews) {
+        if ([subview isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)subview;
+            if ([label.text isEqualToString:self.message]) {
+                [NSLayoutConstraint activateConstraints:@[
+                    [label.heightAnchor constraintGreaterThanOrEqualToConstant:20]
+                ]];
+            }
+        }
+
+        [self traverseAndAdjust:subview];
+    }
+}
+
+@end
+
 @interface VLCServerListTVViewController ()
 @property (nonatomic, copy) NSMutableArray<id<VLCLocalNetworkService>> *networkServices;
-
 @end
 
 @implementation VLCServerListTVViewController
@@ -50,7 +81,7 @@
     if (@available(tvOS 13.0, *)) {
         self.navigationController.navigationBarHidden = YES;
     }
-    
+
     self.automaticallyAdjustsScrollViewInsets = NO;
     self.edgesForExtendedLayout = UIRectEdgeAll ^ UIRectEdgeTop;
 
@@ -85,6 +116,7 @@
 
     NSArray *classes = @[
                          [VLCLocalNetworkServiceBrowserManualConnect class],
+                         [VLCLocalNetworkServiceBrowserFavorites class],
                          [VLCLocalNetworkServiceBrowserHTTP class],
                          [VLCLocalNetworkServiceBrowserUPnP class],
                          [VLCLocalNetworkServiceBrowserDSM class],
@@ -101,18 +133,17 @@
     return NSLocalizedString(@"LOCAL_NETWORK", nil);
 }
 
-- (void)viewDidAppear:(BOOL)animated
+- (void)viewWillAppear:(BOOL)animated
 {
-    [super viewDidAppear:animated];
+    [super viewWillAppear:animated];
     [self.discoveryController startDiscovery];
 }
 
-- (void)viewDidDisappear:(BOOL)animated
+- (void)viewWillDisappear:(BOOL)animated
 {
-    [super viewDidDisappear:animated];
+    [super viewWillDisappear:animated];
     [self.discoveryController stopDiscovery];
     self.networkServices = nil;
-    [self.collectionView reloadData];
 }
 
 #pragma mark - Collection view data source
@@ -182,8 +213,15 @@
 
         /* UPnP does not support authentication, so skip this step */
         if ([login.protocolIdentifier isEqualToString:VLCNetworkServerProtocolIdentifierUPnP]) {
-            VLCNetworkServerBrowserVLCMedia *serverBrowser = [VLCNetworkServerBrowserVLCMedia UPnPNetworkServerBrowserWithLogin:login];
-                        VLCServerBrowsingTVViewController *browsingViewController = [[VLCSearchableServerBrowsingTVViewController alloc] initWithServerBrowser:serverBrowser];
+            VLCNetworkServerBrowserVLCMedia *serverBrowser;
+            if (login.rootMedia != nil) {
+                serverBrowser = [[VLCNetworkServerBrowserVLCMedia alloc] initWithMedia:login.rootMedia options:login.options];
+            } else {
+                serverBrowser = [VLCNetworkServerBrowserVLCMedia UPnPNetworkServerBrowserWithLogin:login];
+            }
+
+            VLCServerBrowsingTVViewController *browsingViewController = [[VLCSearchableServerBrowsingTVViewController alloc] initWithServerBrowser:serverBrowser];
+
             [self presentViewController:[[UINavigationController alloc] initWithRootViewController:browsingViewController]
                                animated:YES
                              completion:nil];
@@ -193,10 +231,17 @@
         NSError *error = nil;
         if ([login loadLoginInformationFromKeychainWithError:&error])
         {
-            if (login.protocolIdentifier)
-                [self showLoginAlertWithLogin:login];
-            else {
-                VLCNetworkLoginTVViewController *targetViewController = [VLCNetworkLoginTVViewController alloc];
+            if (login.protocolIdentifier) {
+                if ([login.protocolIdentifier isEqualToString:@"favorites"]) {
+                    FavoriteListViewController *favoriteListViewController = [[FavoriteListViewController alloc] init];
+                     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:favoriteListViewController];
+                    navController.view.window.translatesAutoresizingMaskIntoConstraints = NO;
+                     [self presentViewController: navController animated:YES completion:nil];
+                } else {
+                    [self showLoginAlertWithLogin:login];
+                }
+            } else {
+                VLCNetworkLoginTVViewController *targetViewController = [[VLCNetworkLoginTVViewController alloc] initWithNibName:nil bundle:nil];
                 [self presentViewController:targetViewController animated:YES completion:nil];
             }
         } else {
@@ -253,7 +298,7 @@
 }
 - (void)showLoginAlertWithLogin:(nonnull VLCNetworkServerLoginInformation *)login
 {
-    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"CONNECT_TO_SERVER", nil)
+    AlertControllerWithMessageHeight *alertController = [AlertControllerWithMessageHeight alertControllerWithTitle:NSLocalizedString(@"CONNECT_TO_SERVER", nil)
                                                                              message:login.address preferredStyle:UIAlertControllerStyleAlert];
 
     __block UITextField *usernameField = nil;

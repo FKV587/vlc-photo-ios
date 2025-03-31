@@ -17,6 +17,8 @@
 @class VLCServices;
 @class VLCQueueViewController;
 
+typedef NS_ENUM(UInt8, VLCMLMediaType);
+
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString * const VLCPlayerDisplayControllerDisplayMiniPlayer;
@@ -55,11 +57,13 @@ typedef NS_ENUM(NSUInteger, VLCPlayerDisplayControllerDisplayMode) {
 @property (nonatomic, strong, readonly, nullable) VLCQueueViewController *queueViewController;
 @property (nullable, nonatomic, readonly) NSArray<UIKeyCommand *> *keyCommands;
 @property (nonatomic, readonly) BOOL canBecomeFirstResponder;
+@property (readonly, nullable) UIViewController *videoPlayerViewController;
+@property (readwrite, nonatomic) VLCMLMediaType currentMediaType;
 
-- (nullable instancetype)init;
+- (instancetype)init;
 - (instancetype)initWithNibName:(nullable NSString *)nibNameOrNil
                                  bundle:(nullable NSBundle *)nibBundleOrNil NS_UNAVAILABLE;
-- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder NS_UNAVAILABLE;
+- (instancetype)initWithCoder:(NSCoder *)aDecoder NS_UNAVAILABLE;
 
 - (void)showFullscreenPlayback;
 - (void)showAudioPlayer;

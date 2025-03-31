@@ -8,7 +8,7 @@
  * Authors: Carola Nitz <nitz.carola # googlemail.com>
  *
  * Refer to the COPYING file of the official project for license.
-*****************************************************************************/
+ *****************************************************************************/
 
 import Foundation
 import UIKit
@@ -36,11 +36,12 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
     @IBOutlet weak var additionalMediaOverlay: UIView!
     @IBOutlet weak var numberLabel: UILabel!
     @IBOutlet weak var groupSizeLabel: UILabel!
+    @IBOutlet weak var groupLastPlayedLabel: UILabel!
 
     private var thumbnailsArray: [UIImageView] = []
     private let itemCornerRadius: CGFloat = 4.5
     private let groupCornerRadius: CGFloat = 3.0
-
+    var lastPlayed: Bool = false
     override class var edgePadding: CGFloat {
         return 12.5
     }
@@ -51,7 +52,7 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
     override var isSelected: Bool {
         didSet {
             checkboxImageView.image = isSelected ? UIImage(named: "checkboxSelected")
-                : UIImage(named: "checkboxEmpty")
+            : UIImage(named: "checkboxEmpty")
         }
     }
 
@@ -83,15 +84,16 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
 
     override func awakeFromNib() {
         super.awakeFromNib()
-        if #available(iOS 11.0, *) {
-            thumbnailView.accessibilityIgnoresInvertColors = true
-        }
+        thumbnailView.accessibilityIgnoresInvertColors = true
 
         clipsToBounds = true
         layer.cornerRadius = 2
 
         newLabel.text = NSLocalizedString("NEW", comment: "")
         newLabel.textColor = PresentationTheme.current.colors.orangeUI
+
+        groupLastPlayedLabel.text = NSLocalizedString("LAST_PLAYED_PLAYLIST_LABEL_TITLE", comment: "")
+        groupLastPlayedLabel.textColor = PresentationTheme.current.colors.orangeUI
 
         let notificationCenter = NotificationCenter.default
         notificationCenter.addObserver(self, selector: #selector(themeDidChange),
@@ -133,6 +135,7 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
         mediaView.backgroundColor = backgroundColor
         groupView.backgroundColor = backgroundColor
         newLabel.backgroundColor = backgroundColor
+        groupLastPlayedLabel.backgroundColor = backgroundColor
         thumbnailsBackground.backgroundColor = colors.thumbnailBackgroundColor
     }
 
@@ -143,6 +146,7 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
         descriptionLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         sizeLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
         groupSizeLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        groupLastPlayedLabel.font = UIFont.preferredCustomFont(forTextStyle: .caption1).bolded
     }
 
     private func setThumbnails(medias: [VLCMLMedia]?) {
@@ -176,26 +180,29 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
         }
         newLabel.isHidden = !movie.isNew
         sizeLabel.text = movie.formatSize()
+        groupLastPlayedLabel.isHidden = true
 
         progressView.progressViewStyle = .bar
 
         if !progressView.isHidden {
-            if #available(iOS 11.0, *) {
-                progressView.layer.cornerRadius = itemCornerRadius
-                progressView.clipsToBounds = true
-                progressView.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-            } else {
-                let path = UIBezierPath(roundedRect: progressView.bounds,
-                                        byRoundingCorners: [.bottomLeft, .bottomRight],
-                                        cornerRadii: CGSize(width: 7, height: 7))
-                let maskLayer = CAShapeLayer()
-                maskLayer.path = path.cgPath
-                progressView.layer.mask = maskLayer
-            }
+            progressView.layer.cornerRadius = itemCornerRadius
+            progressView.clipsToBounds = true
+            progressView.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         }
     }
 
     func update(playlist: VLCMLPlaylist) {
+        let playbackService = PlaybackService.sharedInstance()
+
+        if lastPlayed {
+            let isCurrentlyPlayingPlaylist = UserDefaults.standard.bool(forKey: kVLCIsCurrentlyPlayingPlaylist)
+            let shouldDisplayLastPlayedLabel = (!playbackService.isPlaying && playbackService.currentlyPlayingMedia == nil) || !isCurrentlyPlayingPlaylist
+            groupLastPlayedLabel.isHidden = !shouldDisplayLastPlayedLabel
+            groupLastPlayedLabel.text = NSLocalizedString("LAST_PLAYED_PLAYLIST_LABEL_TITLE", comment: "")
+        } else {
+            groupLastPlayedLabel.isHidden = true
+        }
+
         mediaView.isHidden = true
         progressView.isHidden = true
 
@@ -232,6 +239,7 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
         groupSizeLabel.text = mediaGroup.numberOfTracksString()
 
         groupView.isHidden = false
+        groupLastPlayedLabel.isHidden = true
     }
 
     override class func numberOfColumns(for width: CGFloat) -> CGFloat {
@@ -288,5 +296,7 @@ class MovieCollectionViewCell: BaseCollectionViewCell {
         numberLabel.text = ""
         groupSizeLabel.text = ""
         groupView.isHidden = true
+        groupLastPlayedLabel.isHidden = true
+        lastPlayed = false
     }
 }

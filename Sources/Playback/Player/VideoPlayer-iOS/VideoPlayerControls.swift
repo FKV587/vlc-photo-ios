@@ -10,7 +10,7 @@
  * Refer to the COPYING file of the official project for license.
 *****************************************************************************/
 
-@objc (VLCVideoPlayerControlsDelegate)
+@objc(VLCVideoPlayerControlsDelegate)
 protocol VideoPlayerControlsDelegate: AnyObject {
     // MARK: - Left Controls
 
@@ -26,7 +26,7 @@ protocol VideoPlayerControlsDelegate: AnyObject {
     @objc optional func videoPlayerControlsDelegateDidLongPressPlayPauseBegan(_ videoPlayerControls: VideoPlayerControls)
     func videoPlayerControlsDelegateDidLongPressPlayPauseEnded(_ videoPlayerControls: VideoPlayerControls)
     func videoPlayerControlsDelegateDidTapNextMedia(_ videoPlayerControls: VideoPlayerControls)
-    func videoPlayerControlsDelegateDidTapForeward(_ videoPlayerControls: VideoPlayerControls)
+    func videoPlayerControlsDelegateDidTapForward(_ videoPlayerControls: VideoPlayerControls)
 
     // MARK: - Right Controls
 
@@ -138,6 +138,30 @@ class VideoPlayerControls: UIView {
                                                                  comment: "")
         moreActionsButton.accessibilityHint = NSLocalizedString("MORE_OPTIONS_HINT",
                                                                 comment: "")
+
+        self.accessibilityLabel = NSLocalizedString("PLAYBACK_CONTROLS_BAR_TITLE",
+                                                    comment: "")
+        self.accessibilityHint = NSLocalizedString("PLAYBACK_CONTROLS_BAR_HINT",
+                                                   comment: "")
+
+        // Play/pause is the most important.
+        // Then, next track, then previous.
+        // Lastly, iterate over the remaining controls left to right.
+        applyAccessibilityControls(
+            playPauseButton,
+            nextMediaButton,
+            previousMediaButton,
+
+            rotationLockButton,
+            dvdButton,
+            subtitleButton,
+            repeatButton,
+            backwardButton,
+            forwardButton,
+            shuffleButton,
+            aspectRatioButton,
+            moreActionsButton
+        )
     }
 
     func setupLongPressGestureRecognizer() {
@@ -148,6 +172,18 @@ class VideoPlayerControls: UIView {
     func updatePlayPauseButton(toState isPlaying: Bool) {
         let imageName = isPlaying ? "pause-circle" : "play-circle"
         playPauseButton.setImage(UIImage(named: imageName), for: .normal)
+    }
+
+    func shouldEnableSeekButtons(_ enable: Bool) {
+        backwardButton.isEnabled = enable
+        backwardButton.isHidden = !enable
+        forwardButton.isEnabled = enable
+        forwardButton.isHidden = !enable
+
+        previousMediaButton.isEnabled = !enable
+        previousMediaButton.isHidden = enable
+        nextMediaButton.isEnabled = !enable
+        nextMediaButton.isHidden = enable
     }
 
     func shouldDisableControls(_ disable: Bool) {
@@ -219,7 +255,7 @@ extension VideoPlayerControls {
     }
 
     @IBAction func handleForwardButton(_ sender: Any) {
-        delegate?.videoPlayerControlsDelegateDidTapForeward(self)
+        delegate?.videoPlayerControlsDelegateDidTapForward(self)
     }
 }
 

@@ -17,13 +17,13 @@ import UIKit
     private struct EqualizerFrequency {
         let stack: UIStackView
         let currentValueLabel: UILabel
-        let slider: VerticalSlider
+        let slider: VerticalSliderControl
         let frequencyLabel: UILabel
 
         init(frequency: Int, index: Int) {
             stack = UIStackView()
             currentValueLabel = UILabel()
-            slider = VerticalSlider()
+            slider = VerticalSliderControl()
             frequencyLabel = UILabel()
 
             setupSlider(tag: index)
@@ -46,10 +46,10 @@ import UIKit
 
         private func setupSlider(tag: Int) {
             slider.tag = tag
-            slider.maximumValue = 20.0
-            slider.value = 0.0
-            slider.minimumValue = -20.0
-            slider.setThumbImage(image: UIImage(named: "sliderKnob"), for: .normal)
+            slider.range = -20...20
+            slider.setValue(0, animated: false)
+            slider.thumbImage = UIImage(named: "sliderKnob")
+            slider.trackWidth = 4
         }
 
         private func setupCurrentValueLabel() {
@@ -81,7 +81,7 @@ import UIKit
     @objc var delegate: EqualizerViewDelegate? {
         didSet {
             createFrequencyStacks()
-            if var profiles = delegate?.equalizerProfiles() as? [VLCAudioEqualizer.Preset] {
+            if let profiles = delegate?.equalizerProfiles() as? [VLCAudioEqualizer.Preset] {
                 presetSelectorView = EqualizerPresetSelector(profiles: profiles)
             }
             setupViews()
@@ -104,7 +104,7 @@ import UIKit
     private let minus20Label = UILabel()
     private let snapBandsLabel = UILabel()
     private let snapBandsSwitch = UISwitch()
-    private let cancelButton = UIButton()
+    private let saveButton = UIButton()
     private let resetButton = UIButton()
 
     private var eqFrequencies: [EqualizerFrequency] = []
@@ -112,7 +112,8 @@ import UIKit
     private var oldValues: [Float] = []
 
     private var parentPopup: PopupView?
-    private var showCancel = false
+
+    private var playbackService = PlaybackService.sharedInstance()
 
     override func didMoveToSuperview() {
         super.didMoveToSuperview()
@@ -132,10 +133,9 @@ import UIKit
     }
 
     func willShow() {
-        showCancel = false
-        parentPopup?.updateAccessoryViews()
-        reloadData()
+        shouldDisplaySaveButton(false)
         resetValuesOnShow()
+        reloadData()
     }
 
     // MARK: - Setup
@@ -222,9 +222,10 @@ import UIKit
         snapBandsStackView.alignment = .center
 
         //Init buttons views
-        cancelButton.setImage(UIImage(named: "iconUndo"), for: .normal)
-        cancelButton.addTarget(self, action: #selector(cancelEqualizer), for: .touchUpInside)
-        cancelButton.setContentHuggingPriority(.required, for: .horizontal)
+        saveButton.setTitle(NSLocalizedString("BUTTON_SAVE", comment: ""), for: .normal)
+        saveButton.addTarget(self, action: #selector(saveNewProfile), for: .touchUpInside)
+        saveButton.setContentHuggingPriority(.required, for: .horizontal)
+
         resetButton.setTitle(NSLocalizedString("BUTTON_RESET", comment: ""), for: .normal)
         resetButton.addTarget(self, action: #selector(resetEqualizer), for: .touchUpInside)
         resetButton.setContentHuggingPriority(.required, for: .vertical)
@@ -234,6 +235,11 @@ import UIKit
         setupFrequenciesStackView()
         setupConstraints()
         setupTheme()
+
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(resetEqualizer),
+                                               name: NSNotification.Name(VLCPlaybackServicePlaybackDidStop),
+                                               object: nil)
     }
 
     private func setupConstraints() {
@@ -340,23 +346,23 @@ import UIKit
         zeroLabel.textColor = colors.cellTextColor
         minus20Label.textColor = colors.cellTextColor
         snapBandsLabel.textColor = colors.cellTextColor
-        cancelButton.tintColor = colors.orangeUI
+        saveButton.setTitleColor(colors.orangeUI, for: .normal)
         resetButton.setTitleColor(colors.orangeUI, for: .normal)
 
         for eqFrequency in eqFrequencies {
             eqFrequency.currentValueLabel.textColor = colors.cellTextColor
-            eqFrequency.slider.tintColor = colors.orangeUI
+            eqFrequency.slider.minimumTrackLayerColor = colors.orangeUI.cgColor
+            eqFrequency.slider.maximumTrackLayerColor = UIColor(white: 1, alpha: 0.25).cgColor
             eqFrequency.frequencyLabel.textColor = colors.cellTextColor
         }
     }
 
     @objc func reloadData() {
         if let delegate = delegate {
-            presetSelectorView?.setPreampSliderValue(Float(delegate.preAmplification))
-            presetSelectorView?.setSelectedProfileValue(delegate.selectedEqualizerProfile())
+            presetSelectorView?.setPreampSliderValue(Float(playbackService.preAmplification))
 
             for (i, eqFrequency) in eqFrequencies.enumerated() {
-                eqFrequency.slider.value = Float(delegate.amplification(ofBand: UInt32(i)))
+                eqFrequency.slider.setValue(Float(delegate.amplification(ofBand: UInt32(i))), animated: false)
                 eqFrequency.currentValueLabel.text = "\(Double(Int(eqFrequency.slider.value * 100)) / 100)"
             }
         }
@@ -366,22 +372,20 @@ import UIKit
 // MARK: - Slider events
 
 extension EqualizerView {
-    @objc func sliderWillChangeValue(sender: UISlider) {
+    @objc func sliderWillChangeValue(sender: VerticalSliderControl) {
         oldValues.removeAll()
         for eqFrequency in eqFrequencies {
             oldValues.append(eqFrequency.slider.value)
         }
     }
 
-    @objc func sliderDidChangeValue(sender: UISlider) {
-        delegate?.setAmplification(CGFloat(sender.value), forBand: UInt32(sender.tag))
-        showCancel = true
-        parentPopup?.updateAccessoryViews()
+    @objc func sliderDidChangeValue(sender: VerticalSliderControl) {
+        playbackService.setAmplification(CGFloat(sender.value), forBand: UInt32(sender.tag))
+        shouldDisplaySaveButton(true)
         UIDelegate?.equalizerViewShowIcon()
-        hideEqualizerIconIfNeeded()
     }
 
-    @objc func sliderDidDrag(sender: UISlider) {
+    @objc func sliderDidDrag(sender: VerticalSliderControl) {
         let index = sender.tag
 
         if snapBandsSwitch.isOn {
@@ -392,7 +396,8 @@ extension EqualizerView {
                     if let currentSlider = eqFrequencies.objectAtIndex(index: i),
                        let oldValue = oldValues.objectAtIndex(index: i) {
                         let delta_index = Float(abs(i - index))
-                        currentSlider.slider.value = oldValue + delta / Float(pow(delta_index, 3) + 1)
+                        let newValue = oldValue + delta / Float(pow(delta_index, 3) + 1)
+                        currentSlider.slider.setValue(newValue, animated: false)
                     }
                 }
             }
@@ -418,42 +423,110 @@ extension EqualizerView {
     }
 }
 
-// MARK: - Reset button event
+// MARK: - Buttons event
 
 extension EqualizerView {
-    @objc func cancelEqualizer() {
-        for (i, eqFrequency) in eqFrequencies.enumerated() {
-            let value = valuesOnShow.objectAtIndex(index: i) ?? 0
-            eqFrequency.slider.value = value
-            sliderDidChangeValue(sender: eqFrequency.slider.slider)
-            eqFrequency.currentValueLabel.text = "\(Double(Int(value * 100)) / 100)"
+    @objc func saveNewProfile() {
+        let alertController = UIAlertController(title: NSLocalizedString("CUSTOM_EQUALIZER_ALERT_TITLE", comment: ""),
+                                                message: NSLocalizedString("CUSTOM_EQUALIZER_ALERT_MESSAGE", comment: ""),
+                                                preferredStyle: .alert)
+
+        alertController.addTextField { textField in
+            textField.translatesAutoresizingMaskIntoConstraints = false
+            textField.text = NSLocalizedString("DEFAULT_PROFILE_NAME", comment: "")
         }
-        showCancel = false
-        parentPopup?.updateAccessoryViews()
+
+        let saveAction = UIAlertAction(title: NSLocalizedString("BUTTON_SAVE", comment: ""), style: .default) { _ in
+            let name: String = alertController.textFields?.first?.text ?? NSLocalizedString("DEFAULT_PROFILE_NAME", comment: "")
+            var frequencies: [Float] = []
+
+            for frequency in self.eqFrequencies {
+                frequencies.append(frequency.slider.value)
+            }
+
+            let preAmplification = self.playbackService.preAmplification
+
+            let customProfile = CustomEqualizerProfile(name: name, preAmpLevel: Float(preAmplification), frequencies: frequencies)
+            let encodedProfiles = UserDefaults.standard.data(forKey: kVLCCustomEqualizerProfiles)
+            var customProfiles: CustomEqualizerProfiles
+
+            if let encodedProfiles = encodedProfiles,
+               let profiles = NSKeyedUnarchiver(forReadingWith: encodedProfiles).decodeObject(forKey: "root") as? CustomEqualizerProfiles {
+                profiles.profiles.append(customProfile)
+                customProfiles = profiles
+            } else {
+                customProfiles = CustomEqualizerProfiles(profiles: [customProfile])
+            }
+
+            let index = customProfiles.profiles.count - 1
+            let userDefaults = UserDefaults.standard
+            userDefaults.setValue(NSKeyedArchiver.archivedData(withRootObject: customProfiles), forKey: kVLCCustomEqualizerProfiles)
+            userDefaults.setValue(true, forKey: kVLCCustomProfileEnabled)
+            userDefaults.setValue(false, forKey: kVLCSettingEqualizerProfileDisabled)
+            userDefaults.setValue(index, forKey: kVLCSettingEqualizerProfile)
+
+            self.presetSelectorView?.presetsTableView.reloadData()
+            self.shouldDisplaySaveButton(false)
+            self.hideEqualizerIconIfNeeded()
+        }
+
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+
+        alertController.addAction(saveAction)
+        alertController.addAction(cancelAction)
+
+        UIDelegate?.displayAlert(alertController)
     }
 
     @objc func resetEqualizer() {
-        for eqFrequency in eqFrequencies {
-            eqFrequency.slider.value = 0
-            sliderDidChangeValue(sender: eqFrequency.slider.slider)
-            eqFrequency.currentValueLabel.text = "0.0"
+        let userDefaults = UserDefaults.standard
+        let isEqualizerDisabled = userDefaults.bool(forKey: kVLCSettingEqualizerProfileDisabled)
+        let isCustomProfile = userDefaults.bool(forKey: kVLCCustomProfileEnabled)
+
+        let profile: Int
+        if !isCustomProfile {
+            profile = isEqualizerDisabled ? 0 : userDefaults.integer(forKey: kVLCSettingEqualizerProfile) + 1
+            delegate?.resetEqualizer(fromProfile: UInt32(profile))
+        } else {
+            profile = userDefaults.integer(forKey: kVLCSettingEqualizerProfile)
+            applyCustomProfile(profile)
         }
 
-        let preampValue = UserDefaults.standard.float(forKey: kVLCSettingDefaultPreampLevel)
-        delegate?.preAmplification = CGFloat(preampValue)
-        presetSelectorView?.setPreampSliderValue(preampValue)
-
-        UIDelegate?.equalizerViewHideIcon()
+        reloadData()
+        hideEqualizerIconIfNeeded()
+        shouldDisplaySaveButton(false)
     }
 
     private func hideEqualizerIconIfNeeded() {
-        for eqFrequency in eqFrequencies {
-            if eqFrequency.slider.value != 0 {
-                return
-            }
+        UIDelegate?.equalizerViewHideIcon()
+    }
+
+    private func applyCustomProfile(_ index: Int) {
+        let userDefaults = UserDefaults.standard
+        let encodedData = userDefaults.data(forKey: kVLCCustomEqualizerProfiles)
+
+        guard let encodedData = encodedData,
+              let customProfiles = NSKeyedUnarchiver(forReadingWith: encodedData).decodeObject(forKey: "root") as? CustomEqualizerProfiles,
+              index < customProfiles.profiles.count else {
+            return
         }
 
-        UIDelegate?.equalizerViewHideIcon()
+        let selectedProfile = customProfiles.profiles[index]
+        playbackService.preAmplification = CGFloat(selectedProfile.preAmpLevel)
+
+        for (bandIndex, frequency) in selectedProfile.frequencies.enumerated() {
+            playbackService.setAmplification(CGFloat(frequency), forBand: UInt32(bandIndex))
+        }
+
+        userDefaults.setValue(index, forKey: kVLCSettingEqualizerProfile)
+        userDefaults.setValue(false, forKey: kVLCSettingEqualizerProfileDisabled)
+        userDefaults.setValue(true, forKey: kVLCCustomProfileEnabled)
+    }
+
+    private func shouldDisplaySaveButton(_ display: Bool) {
+        UIView.animate(withDuration: 0.3) {
+            self.saveButton.isHidden = !display
+        }
     }
 }
 
@@ -461,12 +534,72 @@ extension EqualizerView {
 
 extension EqualizerView: EqualizerPresetSelectorDelegate {
     func equalizerPresetSelector(_ equalizerPresetSelector: EqualizerPresetSelector, didSetPreamp preamp: Float) {
-        delegate?.preAmplification = CGFloat(preamp)
+        playbackService.preAmplification = CGFloat(preamp)
+        shouldDisplaySaveButton(true)
     }
 
-    func equalizerPresetSelector(_ equalizerPresetSelector: EqualizerPresetSelector, didSelectPreset preset: Int) {
-        delegate?.resetEqualizer(fromProfile: UInt32(preset))
+    func equalizerPresetSelector(_ equalizerPresetSelector: EqualizerPresetSelector, didSelectPreset preset: Int, isCustom: Bool) {
+        if !isCustom {
+            delegate?.resetEqualizer(fromProfile: UInt32(preset))
+        } else {
+            applyCustomProfile(preset)
+        }
+
+        shouldDisplaySaveButton(false)
         reloadData()
+    }
+
+    func equalizerPresetSelector(_ equalizerPresetSelector: EqualizerPresetSelector, displayAlertOfType type: EqualizerEditActionsIdentifier, index: IndexPath) {
+        let title = type == .delete ? NSLocalizedString("DELETE_CUSTOM_PROFILE_TITLE", comment: "") : NSLocalizedString("RENAME_CUSTOM_PROFILE_TITLE", comment: "")
+        let message = type == .delete ? NSLocalizedString("DELETE_CUSTOM_PROFILE_MESSAGE", comment: "") : ""
+        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+
+        let action: UIAlertAction
+
+        if type == .delete {
+            action = UIAlertAction(title: NSLocalizedString("BUTTON_DELETE", comment: ""), style: .destructive) { _ in
+                let customEncodedProfiles = UserDefaults.standard.data(forKey: kVLCCustomEqualizerProfiles)
+                guard let customEncodedProfiles = customEncodedProfiles,
+                      var customProfiles = NSKeyedUnarchiver(forReadingWith: customEncodedProfiles).decodeObject(forKey: "root") as? CustomEqualizerProfiles,
+                      index.row < customProfiles.profiles.count else {
+                    return
+                }
+
+                customProfiles.profiles.remove(at: index.row)
+                UserDefaults.standard.setValue(NSKeyedArchiver.archivedData(withRootObject: customProfiles), forKey: kVLCCustomEqualizerProfiles)
+                self.presetSelectorView?.presetsTableView.reloadData()
+            }
+        } else {
+            alertController.addTextField { textField in
+                textField.translatesAutoresizingMaskIntoConstraints = false
+                textField.text = self.presetSelectorView?.presetsTableView.cellForRow(at: index)?.textLabel?.text
+            }
+
+            action = UIAlertAction(title: NSLocalizedString("BUTTON_RENAME", comment: ""), style: .default) { _ in
+                let customEncodedProfiles = UserDefaults.standard.data(forKey: kVLCCustomEqualizerProfiles)
+                guard let customEncodedProfiles = customEncodedProfiles,
+                      let customProfiles = NSKeyedUnarchiver(forReadingWith: customEncodedProfiles).decodeObject(forKey: "root") as? CustomEqualizerProfiles,
+                      index.row < customProfiles.profiles.count else {
+                    return
+                }
+
+                guard let newName = alertController.textFields?.first?.text,
+                      !newName.isEmpty else {
+                    return
+                }
+
+                customProfiles.profiles[index.row].name = newName
+                UserDefaults.standard.setValue(NSKeyedArchiver.archivedData(withRootObject: customProfiles), forKey: kVLCCustomEqualizerProfiles)
+                self.presetSelectorView?.presetsTableView.reloadData()
+            }
+        }
+
+        let cancelAction = UIAlertAction(title: NSLocalizedString("BUTTON_CANCEL", comment: ""), style: .cancel)
+
+        alertController.addAction(action)
+        alertController.addAction(cancelAction)
+
+        UIDelegate?.displayAlert(alertController)
     }
 }
 
@@ -477,25 +610,19 @@ extension EqualizerView: PopupViewAccessoryViewsDelegate {
         if parentPopup == nil {
             parentPopup = popupView
         }
-        if showCancel {
-            return [cancelButton, resetButton]
-        } else {
-            return [resetButton]
-        }
+
+        return [saveButton, resetButton]
     }
 }
 
 // MARK: - EqualizerViewDelegate
 
 @objc protocol EqualizerViewDelegate {
-    @objc var preAmplification: CGFloat { get set }
-    @objc func setAmplification(_ amplification: CGFloat, forBand index: UInt32)
     @objc func amplification(ofBand index: UInt32) -> CGFloat
     @objc func equalizerProfiles() -> NSArray
     @objc func resetEqualizer(fromProfile profile: UInt32)
     @objc func numberOfBands() -> UInt32
     @objc func frequencyOfBand(atIndex index: UInt32) -> CGFloat
-    @objc func selectedEqualizerProfile() -> UInt32
 }
 
 // MARK: - EqualizerViewUIDelegate
@@ -503,4 +630,5 @@ extension EqualizerView: PopupViewAccessoryViewsDelegate {
 protocol EqualizerViewUIDelegate: AnyObject {
     func equalizerViewShowIcon()
     func equalizerViewHideIcon()
+    func displayAlert(_ alert: UIAlertController)
 }

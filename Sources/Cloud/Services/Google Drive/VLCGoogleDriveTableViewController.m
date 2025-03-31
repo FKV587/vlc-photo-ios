@@ -5,10 +5,10 @@
  * Copyright (c) 2013-2015 VideoLAN. All rights reserved.
  * $Id$
  *
- * Authors: Carola Nitz <nitz.carola # googlemail.com>
- *          Felix Paul Kühne <fkuehne # videolan.org>
- *          Soomin Lee <TheHungryBu # gmail.com>
- *
+ * Authors:  Carola Nitz <nitz.carola # googlemail.com>
+ *        Felix Paul Kühne <fkuehne # videolan.org>
+ *        Soomin Lee <TheHungryBu # gmail.com>
+ *        Eshan Singh <eeeshan789 # gmail.com>
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
 
@@ -105,7 +105,7 @@
     if (row < listOfFiles.count) {
         cell.driveFile = listOfFiles[row];
         if ([cell.driveFile.mimeType isEqualToString:@"application/vnd.google-apps.folder"])
-            [cell setIsDownloadable:NO];
+            [cell setIsDownloadable: YES];
         else
             [cell setIsDownloadable:YES];
     }
@@ -139,29 +139,31 @@
 {
     _selectedFile = _googleDriveController.currentListFiles[[self.tableView indexPathForCell:cell].row];
 
-    if (_selectedFile.size.longLongValue < [[UIDevice currentDevice] VLCFreeDiskSpace].longLongValue) {
-        /* selected item is a proper file, ask the user if s/he wants to download it */
-        NSArray<VLCAlertButton *> *buttonsAction = @[[[VLCAlertButton alloc] initWithTitle: NSLocalizedString(@"BUTTON_CANCEL", nil)
-                                                                                     style: UIAlertActionStyleCancel
-                                                                                  action: ^(UIAlertAction *action) {
-                                                                                      self->_selectedFile = nil;
-                                                                                  }],
-                                                     [[VLCAlertButton alloc] initWithTitle: NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
-                                                                                  action: ^(UIAlertAction *action) {
-                                                                                      [self->_googleDriveController downloadFileToDocumentFolder:self->_selectedFile];
-                                                                                      self->_selectedFile = nil;
-                                                                                  }]
-                                                     ];
-        [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
-                                             errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
-                                           viewController:self
-                                            buttonsAction:buttonsAction];
-    } else {
-        [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DISK_FULL", nil)
-                                             errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DISK_FULL_FORMAT", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
-                                           viewController:self];
-    }
+    /* selected item is a proper file, ask the user if s/he wants to download it */
+    NSArray<VLCAlertButton *> *buttonsAction = @[
+        [[VLCAlertButton alloc] initWithTitle:NSLocalizedString(@"BUTTON_CANCEL", nil)
+                                       style:UIAlertActionStyleCancel
+                                      action:^(UIAlertAction *action) {
+            self->_selectedFile = nil;
+        }],
+        [[VLCAlertButton alloc] initWithTitle:NSLocalizedString(@"BUTTON_DOWNLOAD", nil)
+                                      action:^(UIAlertAction *action) {
+            if ([self->_selectedFile.mimeType isEqualToString:@"application/vnd.google-apps.folder"]) {
+                NSLog(@"Iden: %@", self->_selectedFile.identifier);
+                [self->_googleDriveController downloadFileToDocumentFolder:self->_selectedFile :self.currentPath];
+            } else {
+                [self->_googleDriveController downloadFileToDocumentFolder:self->_selectedFile :@""];
+            }
+            self->_selectedFile = nil;
+        }]
+    ];
+
+    [VLCAlertViewController alertViewManagerWithTitle:NSLocalizedString(@"DROPBOX_DOWNLOAD", nil)
+                                         errorMessage:[NSString stringWithFormat:NSLocalizedString(@"DROPBOX_DL_LONG", nil), _selectedFile.name, [[UIDevice currentDevice] model]]
+                                       viewController:self
+                                        buttonsAction:buttonsAction];
 }
+
 #pragma mark - login dialog
 
 - (void)setAuthorizerAndUpdate
@@ -183,5 +185,24 @@
         [_googleDriveController logout];
     }
 }
+
+- (void)triggerFavoriteForCell:(VLCCloudStorageTableViewCell *)cell 
+{
+    
+    NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
+    VLCFavoriteService *service = [VLCAppCoordinator sharedInstance].favoriteService;
+    GTLRDrive_File *fileAtIndex = _googleDriveController.currentListFiles[indexPath.row];
+
+    VLCFavorite *fav = [[VLCFavorite alloc] init];
+    fav.userVisibleName = fileAtIndex.name;
+    fav.url = [NSURL URLWithString:[NSString stringWithFormat:@"file://Drive/%@", fileAtIndex.identifier]];
+
+    if (cell.isFavourite) {
+        [service addFavorite:fav];
+    } else {
+        [service removeFavorite:fav];
+    }
+}
+
 
 @end

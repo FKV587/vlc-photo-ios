@@ -1,6 +1,6 @@
 #import "VLCTVConstants.h"
 
-#import <TVVLCKit/TVVLCKit.h>
+#import <VLCKit/VLCKit.h>
 
 #import "VLCNetworkServerLoginInformation.h"
 #import "VLCNetworkServerLoginInformation+Keychain.h"
@@ -12,6 +12,7 @@
 #import "VLCLocalNetworkServiceBrowserDSM.h"
 #import "VLCLocalNetworkServiceBrowserNFS.h"
 #import "VLCNetworkServerBrowserVLCMedia+SFTP.h"
+#import "VLCLocalNetworkServiceBrowserUPnP.h"
 
 #import "VLCPlaybackService+MediaLibrary.h"
 
@@ -19,3 +20,7 @@
 #import "VLCSearchableServerBrowsingTVViewController.h"
 
 #import <XKKeychain/XKKeychainGenericPasswordItem.h>
+#import "VLCFavoriteService.h"
+#import "VLCAppCoordinator.h"
+#import "VLCRemoteBrowsingTVCell.h"
+#import "CAAnimation+VLCWiggle.h"

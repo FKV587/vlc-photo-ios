@@ -16,7 +16,6 @@
 #import "VLCOpenNetworkStreamTVViewController.h"
 #import "VLCOpenManagedServersViewController.h"
 #import "VLCSettingsViewController.h"
-#import "VLCCloudServicesTVViewController.h"
 #import "VLCHTTPUploaderController.h"
 #import "VLCRemotePlaybackViewController.h"
 #import "VLCMicroMediaLibraryService.h"
@@ -27,7 +26,6 @@
     UITabBarController *_mainViewController;
 
     VLCServerListTVViewController *_localNetworkVC;
-    VLCCloudServicesTVViewController *_cloudServicesVC;
     VLCRemotePlaybackViewController *_remotePlaybackVC;
     VLCOpenNetworkStreamTVViewController *_openNetworkVC;
     VLCOpenManagedServersViewController *_openManagedServersVC;
@@ -44,7 +42,7 @@
 
     NSDictionary *appDefaults = @{kVLCSettingContinueAudioInBackgroundKey : @(YES),
                                   kVLCSettingStretchAudio : @(YES),
-                                  kVLCSettingDefaultPreampLevel : @(0),
+                                  kVLCSettingDefaultPreampLevel : @(6),
                                   kVLCSettingTextEncoding : kVLCSettingTextEncodingDefaultValue,
                                   kVLCSettingSkipLoopFilter : kVLCSettingSkipLoopFilterNonRef,
                                   kVLCSettingSubtitlesFont : kVLCSettingSubtitlesFontDefaultValue,
@@ -60,6 +58,8 @@
                                   kVLCSettingEqualizerProfile : kVLCSettingEqualizerProfileDefaultValue,
                                   kVLCSettingPlaybackForwardSkipLength : kVLCSettingPlaybackForwardSkipLengthDefaultValue,
                                   kVLCSettingPlaybackBackwardSkipLength : kVLCSettingPlaybackBackwardSkipLengthDefaultValue,
+                                  kVLCSettingPlaybackLockscreenSkip : @(NO),
+                                  kVLCSettingPlaybackRemoteControlSkip : @(NO),
                                   kVLCSettingWiFiSharingIPv6 : kVLCSettingWiFiSharingIPv6DefaultValue,
                                   kVLCAutomaticallyPlayNextItem : @(YES),
                                   kVLCPlayerShouldRememberState: @(YES),
@@ -79,7 +79,6 @@
     _openNetworkVC = [[VLCOpenNetworkStreamTVViewController alloc] initWithNibName:nil bundle:nil];
     _openManagedServersVC = [[VLCOpenManagedServersViewController alloc] initWithNibName:nil bundle:nil];
     _settingsVC = [[VLCSettingsViewController alloc] initWithNibName:nil bundle:nil];
-
     _mainViewController = [[UITabBarController alloc] init];
     _mainViewController.tabBar.barTintColor = [UIColor VLCOrangeTintColor];
     
@@ -87,7 +86,7 @@
     [viewControllers addObject:[[UINavigationController alloc] initWithRootViewController:_localNetworkVC]];
     [viewControllers addObject:[[UINavigationController alloc] initWithRootViewController:_remotePlaybackVC]];
     [viewControllers addObject:[[UINavigationController alloc] initWithRootViewController:_openNetworkVC]];
-
+    
     if(_openManagedServersVC.hasManagedServers) {
         [viewControllers addObject:[[UINavigationController alloc] initWithRootViewController:_openManagedServersVC]];
     }
@@ -116,6 +115,12 @@
         }
     }
     return NO;
+}
+
+- (void)applicationWillTerminate:(UIApplication *)application
+{
+    VLCFavoriteService *fs = [[VLCAppCoordinator sharedInstance] favoriteService];
+    [fs storeContentSynchronously];
 }
 
 @end

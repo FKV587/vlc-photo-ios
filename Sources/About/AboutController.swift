@@ -25,6 +25,7 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
         return PresentationTheme.current.colors.statusBarStyle
     }
 
+#if os(iOS)
     override var shouldAutorotate: Bool {
         let toInterfaceOrientation = UIApplication.shared.statusBarOrientation
         let currentUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom
@@ -33,6 +34,7 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
         }
         return true
     }
+#endif
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
@@ -95,9 +97,10 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
     }
 
     private func loadWebsite() {
+        let webTheme = PresentationTheme.current.webEquivalentTheme
         let mainBundle = Bundle.main
-        let textColor = PresentationTheme.current.colors.cellTextColor.toHex ?? "#000000"
-        let backgroundColor = PresentationTheme.current.colors.background.toHex ?? "#FFFFFF"
+        let textColor = webTheme.colors.cellTextColor.toHex ?? "#000000"
+        let backgroundColor = webTheme.colors.background.toHex ?? "#FFFFFF"
         guard let bundleShortVersionString = mainBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String else {
             return
         }
@@ -113,7 +116,7 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
         do {
             var htmlString = try String(contentsOfFile: staticHTMLPath) as NSString
 
-            let rangeOfLastStringToReplace = htmlString.range(of: "MOBILEVLCKITVERSION")
+            let rangeOfLastStringToReplace = htmlString.range(of: "VLCKITVERSION")
             let lengthOfStringToSearch = rangeOfLastStringToReplace.location +
             rangeOfLastStringToReplace.length +
             versionBuildNumberAndCodeName.count +
@@ -134,7 +137,7 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
                                                          with: backgroundColor,
                                                          options: .literal,
                                                          range: searchRange) as NSString
-            htmlString = htmlString.replacingOccurrences(of: "MOBILEVLCKITVERSION",
+            htmlString = htmlString.replacingOccurrences(of: "VLCKITVERSION",
                                                          with: vlcLibraryVersion,
                                                          options: .literal,
                                                          range: searchRange) as NSString
@@ -155,16 +158,18 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
     }
 
     @objc private func sendFeedbackEmail() {
-        if #available(iOS 10, *) {
-            ImpactFeedbackGenerator().selectionChanged()
-        }
+#if os(iOS)
+        ImpactFeedbackGenerator().selectionChanged()
+#endif
 
         if MFMailComposeViewController.canSendMail() {
             let mailComposerVC = MFMailComposeViewController()
             mailComposerVC.mailComposeDelegate = self
             mailComposerVC.setToRecipients([feedbackEmail])
             mailComposerVC.setSubject(NSLocalizedString("FEEDBACK_EMAIL_TITLE", comment: ""))
-            mailComposerVC.setMessageBody(generateFeedbackEmailPrefill(), isHTML: false)
+            mailComposerVC.addAttachmentData(generateFeedbackEmailAttachment(),
+                                             mimeType: "application/json",
+                                             fileName: "details.json")
             self.present(mailComposerVC, animated: true)
         } else {
             let alert = UIAlertController(title: NSLocalizedString("FEEDBACK_EMAIL_NOT_POSSIBLE_TITLE", comment: ""),
@@ -176,26 +181,33 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
         }
     }
 
-    func generateFeedbackEmailPrefill() -> String {
+    func generateFeedbackEmailAttachment() -> Data {
         let bundleShortVersionString = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
         let device = UIDevice.current
         let defaults = UserDefaults.standard
         let locale = NSLocale.autoupdatingCurrent
-        let prefilledFeedback = String(format: "\n\n\n----------------------------------------\n%@\nDevice: %@\nOS: %@ - %@\nLocale: %@ (%@)\nVLC app version: %@\nlibvlc version: %@\nhardware decoding: %i\nnetwork caching level: %i\nskip loop filter: %i\nRTSP over TCP: %i\nAudio time stretching: %i",
-                                       NSLocalizedString("FEEDBACK_EMAIL_BODY", comment: ""),
-                                       generateDeviceIdentifier(),
-                                       device.systemName,
-                                       device.systemVersion,
-                                       locale.languageCode!,
-                                       locale.regionCode!,
-                                       bundleShortVersionString,
-                                       VLCLibrary.shared().changeset,
-                                       defaults.integer(forKey: kVLCSettingHardwareDecoding),
-                                       defaults.integer(forKey: kVLCSettingNetworkCaching),
-                                       defaults.integer(forKey: kVLCSettingSkipLoopFilter),
-                                       defaults.integer(forKey: kVLCSettingNetworkRTSPTCP),
-                                       defaults.integer(forKey: kVLCSettingStretchAudio))
-        return prefilledFeedback
+
+        let json: [String: Any] = [
+            "Device": generateDeviceIdentifier(),
+            "OS": "\(device.systemName) - \(device.systemVersion)",
+            "Locale": "\(locale.languageCode!) (\(locale.regionCode!))",
+            "VLC app version": bundleShortVersionString,
+            "libvlc version": VLCLibrary.shared().changeset,
+            "hardware decoding": defaults.integer(forKey: kVLCSettingHardwareDecoding),
+            "network caching level": defaults.integer(forKey: kVLCSettingNetworkCaching),
+            "skip loop filter": defaults.integer(forKey: kVLCSettingSkipLoopFilter),
+            "RTSP over TCP": defaults.integer(forKey: kVLCSettingNetworkRTSPTCP),
+            "Audio time stretching": defaults.integer(forKey: kVLCSettingStretchAudio)
+        ]
+
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
+            return jsonData
+        } catch {
+            print("Error encoding JSON: \(error.localizedDescription)")
+            return Data()
+        }
+
     }
 
     func generateDeviceIdentifier() -> String {
@@ -215,9 +227,10 @@ class AboutController: UIViewController, MFMailComposeViewControllerDelegate, UI
 
 
     @objc private func dismissView() {
-        if #available(iOS 10, *) {
-            ImpactFeedbackGenerator().selectionChanged()
-        }
+#if os(iOS)
+        ImpactFeedbackGenerator().selectionChanged()
+#endif
+
         dismiss(animated: true)
     }
 }
@@ -231,11 +244,15 @@ extension AboutController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let requestURL = navigationAction.request.url else {return}
+#if os(iOS)
         if (requestURL.scheme != "") && UIApplication.shared.openURL(requestURL) {
             decisionHandler(.cancel)
         } else {
             decisionHandler(.allow)
         }
+#else
+        decisionHandler(.allow)
+#endif
     }
 }
 
@@ -255,8 +272,6 @@ class AboutNavigationController: UINavigationController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        if #available(iOS 11.0, *) {
-            navigationBar.prefersLargeTitles = false
-        }
+        navigationBar.prefersLargeTitles = false
     }
 }

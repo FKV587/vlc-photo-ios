@@ -77,8 +77,8 @@ class PlaylistModel: MLBaseModel {
         // Update directly the UI without waiting the delegate to avoid showing 'ghost' items
         fileArrayLock.lock()
         filterFilesFromDeletion(of: items)
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 
@@ -89,8 +89,8 @@ class PlaylistModel: MLBaseModel {
             return
         }
         append(playlist)
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 }
@@ -105,8 +105,8 @@ extension PlaylistModel {
         files = medialibrary.playlists(sortingCriteria: criteria, desc: desc)
         sortModel.currentSort = criteria
         sortModel.desc = desc
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 }
@@ -114,7 +114,7 @@ extension PlaylistModel {
 // MARK: - Search
 extension VLCMLPlaylist: SearchableMLModel {
     func contains(_ searchString: String) -> Bool {
-        return name.lowercased().contains(searchString)
+        return search(searchString, in: name)
     }
 }
 
@@ -122,8 +122,8 @@ extension VLCMLPlaylist: SearchableMLModel {
 extension PlaylistModel: MediaLibraryObserver {
     func medialibrary(_ medialibrary: MediaLibraryService, didAddPlaylists playlists: [VLCMLPlaylist]) {
         playlists.forEach({ append($0) })
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 
@@ -136,16 +136,16 @@ extension PlaylistModel: MediaLibraryObserver {
 
         playlistsIds.forEach() {
             guard let safePlaylist = medialibrary.medialib.playlist(withIdentifier: $0.int64Value)
-                else {
-                    return
+            else {
+                return
             }
             playlists.append(safePlaylist)
         }
 
         fileArrayLock.lock()
         files = swapModels(with: playlists)
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 
@@ -160,8 +160,8 @@ extension PlaylistModel: MediaLibraryObserver {
             }
             return true
         }
-        observable.observers.forEach() {
-            $0.value.observer?.mediaLibraryBaseModelReloadView()
+        observable.notifyObservers {
+            $0.mediaLibraryBaseModelReloadView()
         }
     }
 
@@ -216,10 +216,64 @@ extension VLCMLPlaylist: MediaCollectionModel {
 
     func files(with criteria: VLCMLSortingCriteria = .alpha,
                desc: Bool = false) -> [VLCMLMedia]? {
-        return media
+        return media(with: criteria, desc: desc)
     }
 
     func title() -> String {
         return name
+    }
+}
+
+// MARK: - Last Played Playlist Model
+
+class LastPlayedPlaylistModel: NSObject, NSCoding {
+    var identifier: Int64
+    var title: String
+    var lastPlayedMedia: LastPlayed
+
+    init(identifier: Int64, title: String, lastPlayedMedia: LastPlayed) {
+        self.identifier = identifier
+        self.title = title
+        self.lastPlayedMedia = lastPlayedMedia
+    }
+
+    required init?(coder: NSCoder) {
+        self.identifier = coder.decodeInt64(forKey: "identifier")
+        guard let title = coder.decodeObject(forKey: "title") as? String,
+              let lastPlayedMedia = coder.decodeObject(forKey: "lastPlayedMedia") as? LastPlayed else {
+            return nil
+        }
+
+        self.title = title
+        self.lastPlayedMedia = lastPlayedMedia
+    }
+
+    func encode(with coder: NSCoder) {
+        coder.encode(identifier, forKey: "identifier")
+        coder.encode(title, forKey: "title")
+        coder.encode(lastPlayedMedia, forKey: "lastPlayedMedia")
+    }
+}
+
+class LastPlayed: NSObject, NSCoding {
+    var identifier: Int64
+    var title: String
+
+    init(identifier: Int64, title: String) {
+        self.identifier = identifier
+        self.title = title
+    }
+
+    required init?(coder: NSCoder) {
+        self.identifier = coder.decodeInt64(forKey: "identifier")
+        guard let title = coder.decodeObject(forKey: "title") as? String else {
+            return nil
+        }
+        self.title = title
+    }
+
+    func encode(with coder: NSCoder) {
+        coder.encode(identifier, forKey: "identifier")
+        coder.encode(title, forKey: "title")
     }
 }

@@ -133,6 +133,16 @@
 			<string>PSToggleSwitchSpecifier</string>
 		</dict>
 		<dict>
+			<key>DefaultValue</key>
+			<true/>
+			<key>Key</key>
+			<string>RestoreLastPlayedMedia</string>
+			<key>Title</key>
+			<string>SETTINGS_RESTORE_LAST_PLAYED_MEDIA</string>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+		</dict>
+		<dict>
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
@@ -209,6 +219,16 @@
 			<string>PSToggleSwitchSpecifier</string>
 		</dict>
 		<dict>
+			<key>DefaultValue</key>
+			<true/>
+			<key>Key</key>
+			<string>LongTouchSpeedUp</string>
+			<key>Title</key>
+			<string>SETINGS_LONG_TOUCH_SPEED_UP</string>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+		</dict>
+		<dict>
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
@@ -236,6 +256,46 @@
 				<integer>0</integer>
 				<integer>3</integer>
 				<integer>1</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>SETTINGS_PLAYBACK_LOCKSCREEN_SKIP</string>
+			<key>Key</key>
+			<string>playback-lockscreen-skip</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>Titles</key>
+			<array>
+				<string>SETTINGS_PLAYBACK_CONTROLS_SKIP_NO</string>
+				<string>SETTINGS_PLAYBACK_CONTROLS_SKIP_YES</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<false/>
+				<true/>
+			</array>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Title</key>
+			<string>SETTINGS_PLAYBACK_EXTERNAL_CONTROLS_SKIP</string>
+			<key>Key</key>
+			<string>playback-remote-control-skip</string>
+			<key>DefaultValue</key>
+			<false/>
+			<key>Titles</key>
+			<array>
+				<string>SETTINGS_PLAYBACK_CONTROLS_SKIP_NO</string>
+				<string>SETTINGS_PLAYBACK_CONTROLS_SKIP_YES</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<false/>
+				<true/>
 			</array>
 		</dict>
 		<dict>
@@ -299,6 +359,16 @@
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
 			<string>SETTINGS_SUBTITLES_TITLE</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>SETTINGS_SUBTITLES_DISABLE</string>
+			<key>Key</key>
+			<string>kVLCSettingDisableSubtitles</string>
+			<key>DefaultValue</key>
+			<false/>
 		</dict>
 		<dict>
 			<key>infobuttonvalue</key>
@@ -586,6 +656,28 @@
 		</dict>
 		<dict>
 			<key>Type</key>
+			<string>PSMultiValueSpecifier</string>
+			<key>Titles</key>
+			<array>
+				<string>SETTINGS_DURATION_FOUR</string>
+				<string>SETTINGS_DURATION_TEN</string>
+				<string>SETTINGS_DURATION_TWENTY</string>
+			</array>
+			<key>Values</key>
+			<array>
+				<integer>4</integer>
+				<integer>10</integer>
+				<integer>20</integer>
+			</array>
+			<key>Title</key>
+			<string>SETTINGS_SUBTITLES_TEXT_ENCODING</string>
+			<key>Key</key>
+			<string>kVLCSettingPlayerControlDuration</string>
+			<key>DefaultValue</key>
+			<integer>4</integer>
+		</dict>
+		<dict>
+			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 			<key>Title</key>
 			<string>SETTINGS_AUDIO_TITLE</string>
@@ -598,7 +690,7 @@
 			<key>Key</key>
 			<string>pre-amp-level</string>
 			<key>DefaultValue</key>
-			<integer>0</integer>
+			<integer>6</integer>
 			<key>Titles</key>
 			<array>
 				<string>-12 dB</string>

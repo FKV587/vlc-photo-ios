@@ -8,6 +8,7 @@
  * Authors: Felix Paul Kühne <fkuehne # videolan.org>
  *          Pierre SAGASPE <pierre.sagaspe # me.com>
  *          Tobias Conradi <videolan # tobias-conradi.de>
+ *          Diogo Simao Marques <dogo@videolabs.io>
  *
  * Refer to the COPYING file of the official project for license.
  *****************************************************************************/
@@ -88,6 +89,19 @@
     [self updateUI];
 }
 
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+
+    // The container selected has already been parsed and is empty
+    if ([_serverBrowser isKindOfClass:[VLCNetworkServerBrowserVLCMedia class]] &&
+        [(VLCNetworkServerBrowserVLCMedia *)_serverBrowser retrieveParsedStatus] == VLCMediaParsedStatusDone &&
+        _serverBrowser.items.count == 0) {
+        [self stopActivityIndicator];
+        [self removePlayAllAction];
+    }
+}
+
 - (void)miniPlayerIsShown
 {
     self.tableView.contentInset = UIEdgeInsetsMake(0, 0,
@@ -114,6 +128,7 @@
 - (void)networkServerBrowserEndParsing:(id<VLCNetworkServerBrowser>)networkBrowser
 {
     [self stopActivityIndicator];
+    [self removePlayAllActionIfNeeded];
 }
 
 - (void)networkServerBrowser:(id<VLCNetworkServerBrowser>)networkBrowser requestDidFailWithError:(NSError *)error
@@ -141,9 +156,16 @@
     [[VLCActivityManager defaultManager] networkActivityStarted];
 }
 
--(void)handleRefresh
+- (void)handleRefresh
 {
     [self update];
+}
+
+- (void)removePlayAllActionIfNeeded
+{
+    if ([_serverBrowser.items count] == 0) {
+        [self removePlayAllAction];
+    }
 }
 
 #pragma mark - server browser item specifics
@@ -174,6 +196,15 @@
             [_browsingController configureSubtitlesInMediaList:mediaListToPlay];
 
             NSUInteger indexToPlay = [mediaListToPlay indexOfMedia:mediaSelected];
+            if (indexToPlay == NSNotFound) {
+                // this means the pointer to the media was manipulated, which does not mean that the media no longer exists
+                NSURL *mediaURL = mediaSelected.url;
+                for (VLCMedia *iter in mediaArray) {
+                    if ([iter.url isEqual:mediaURL]) {
+                        indexToPlay = [mediaArray indexOfObject:iter];
+                    }
+                }
+            }
             [_browsingController streamMediaList:mediaListToPlay startingAtIndex:indexToPlay];
         }
     }
@@ -262,6 +293,33 @@
     [tableView deselectRowAtIndexPath:indexPath animated:NO];
 }
 
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point
+API_AVAILABLE(ios(13.0)) {
+    VLCNetworkListCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+
+    if (!cell || !cell.isFavorable) {
+        return nil;
+    }
+
+    UIContextMenuConfiguration *menuConfiguration = [UIContextMenuConfiguration configurationWithIdentifier:nil
+                                                                                            previewProvider:nil
+                                                                                             actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggestedActions) {
+        NSMutableArray* actions = [[NSMutableArray alloc] init];
+
+        NSString *optionTitle = cell.isFavorite ? NSLocalizedString(@"REMOVE_FAVORITE", "") : NSLocalizedString(@"ADD_FAVORITE", "");
+        UIImage *image = cell.isFavorite ? [UIImage imageNamed:@"heart"] : [UIImage imageNamed:@"heart.fill"];
+
+        [actions addObject:[UIAction actionWithTitle:optionTitle image:image identifier:nil handler:^(__kindof UIAction * _Nonnull action) {
+            [self triggerFavoriteForCell:cell];
+        }]];
+
+        UIMenu* menu = [UIMenu menuWithTitle:@"" children:actions];
+        return menu;
+    }];
+
+    return menuConfiguration;
+}
+
 #pragma mark - VLCNetworkListCell delegation
 
 - (void)triggerDownloadForCell:(VLCNetworkListCell *)cell
@@ -319,7 +377,9 @@
 - (void)themeDidChange
 {
     self.tableView.backgroundColor = PresentationTheme.current.colors.background;
+#if TARGET_OS_IOS
     [self setNeedsStatusBarAppearanceUpdate];
+#endif
 }
 
 @end

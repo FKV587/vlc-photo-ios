@@ -26,16 +26,21 @@ extension MPVolumeView {
     }
 }
 
+protocol SliderInfoViewDelegate {
+    func sliderInfoViewDidReceiveTouch(_ sliderInfoView: SliderInfoView)
+}
+
 class SliderInfoView: UIView {
+    var delegate: SliderInfoViewDelegate?
 
     var iconNames: [String] = []
 
-    let levelSlider: VerticalSlider = {
-        let levelSlider = VerticalSlider()
-        levelSlider.tintColor = .white
-        levelSlider.minimumValue = 0
-        levelSlider.maximumValue = 1
-        levelSlider.isContinuous = true
+    let levelSlider: VerticalSliderControl = {
+        let levelSlider = VerticalSliderControl()
+        levelSlider.minimumTrackLayerColor = UIColor.white.cgColor
+        levelSlider.maximumTrackLayerColor = UIColor(white: 1, alpha: 0.2).cgColor
+        levelSlider.trackWidth = 4
+        levelSlider.range = 0...1
         levelSlider.translatesAutoresizingMaskIntoConstraints = false
         return levelSlider
     }()
@@ -47,13 +52,19 @@ class SliderInfoView: UIView {
         return levelImageView
     }()
 
+    func update(level: Float) {
+        delegate?.sliderInfoViewDidReceiveTouch(self)
+        updateIcon(level: level)
+    }
+
     func updateIcon(level: Float) {
         guard iconNames.count == 4 else {
             assertionFailure("SliderInfo: icons names not set")
             return
         }
 
-        self.levelSlider.value = level
+        self.levelSlider.setValue(level, animated: false)
+
         if level == 0 {
             self.levelImageView.image = UIImage(named: iconNames[0])
         } else if (0...0.4).contains(level) {
@@ -91,22 +102,27 @@ class SliderInfoView: UIView {
 }
 
 class BrightnessControlView: SliderInfoView {
-
+#if os(iOS)
     init() {
         super.init(frame: .zero)
 
         setupView()
 
         if  !UIAccessibility.isVoiceOverRunning {
-            levelSlider.setThumbImage(image: UIImage(), for: .normal)
+            levelSlider.thumbImage = UIImage()
         }
         self.iconNames = ["brightnessLow", "brightnessLow", "brightnessMedium", "brightnessHigh"]
         levelSlider.addTarget(self, action: #selector(self.onLuminosityChange), for: .valueChanged)
+
+        levelSlider.isAccessibilityElement = true
         levelSlider.accessibilityLabel = NSLocalizedString("BRIGHTNESS_SLIDER", comment: "")
         levelSlider.accessibilityHint = NSLocalizedString("BRIGHTNESS_HINT", comment: "")
-        levelSlider.accessibilityTraits = .adjustable
 
-        updateIcon(level: Float(UIScreen.main.brightness))
+        // Avoid the temptation to put `adjustable` here; the system will add
+        // accessibility controls that do not work.
+        levelSlider.accessibilityTraits = []
+
+        update(level: Float(UIScreen.main.brightness))
     }
 
     required init?(coder: NSCoder) {
@@ -115,7 +131,7 @@ class BrightnessControlView: SliderInfoView {
 
     @objc func onLuminosityChange() {
         UIScreen.main.brightness = CGFloat(levelSlider.value)
-        updateIcon(level: levelSlider.value)
+        update(level: levelSlider.value)
     }
 
     override func setupView() {
@@ -125,6 +141,7 @@ class BrightnessControlView: SliderInfoView {
             levelImageView.leadingAnchor.constraint(equalTo: leadingAnchor)
         ])
     }
+#endif
 }
 
 class VolumeControlView: SliderInfoView {
@@ -136,9 +153,9 @@ class VolumeControlView: SliderInfoView {
 
         setupView()
 
-        self.levelSlider.value = AVAudioSession.sharedInstance().outputVolume
+        self.levelSlider.setValue(AVAudioSession.sharedInstance().outputVolume, animated: false)
         if  !UIAccessibility.isVoiceOverRunning {
-            levelSlider.setThumbImage(image: UIImage(), for: .normal)
+            levelSlider.thumbImage = UIImage()
         }
 
         levelSlider.addTarget(self, action: #selector(self.onVolumeChange), for: .valueChanged)
@@ -146,14 +163,22 @@ class VolumeControlView: SliderInfoView {
         levelSlider.addTarget(self, action: #selector(self.onTouchEnded), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         self.iconNames = ["noSound", "lowSound", "mediumSound", "highSound"]
 
+        levelSlider.isAccessibilityElement = true
         levelSlider.accessibilityLabel = NSLocalizedString("VOLUME_SLIDER", comment: "")
         levelSlider.accessibilityHint = NSLocalizedString("VOLUME_HINT", comment: "")
-        levelSlider.accessibilityTraits = .adjustable
+
+        // Avoid the temptation to put `adjustable` here; the system will add
+        // accessibility controls that do not work.
+        levelSlider.accessibilityTraits = []
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     @objc func onVolumeChange() {
         volumeView?.setVolume(levelSlider.value)
-        updateIcon(level: levelSlider.value)
+        update(level: levelSlider.value)
     }
 
     @objc func onTouchStarted() {
@@ -162,9 +187,6 @@ class VolumeControlView: SliderInfoView {
 
     @objc func onTouchEnded() {
         isBeingTouched = false
-    }
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
     }
 
     override func setupView() {

@@ -13,9 +13,10 @@
 import AVKit
 import MediaPlayer
 
-@objc (VLCMediaNavigationBarDelegate)
+@objc(VLCMediaNavigationBarDelegate)
 protocol MediaNavigationBarDelegate {
     func mediaNavigationBarDidTapClose(_ mediaNavigationBar: MediaNavigationBar)
+    @objc optional func mediaNavigationBarDidTapPictureInPicture(_ mediaNavigationBar: MediaNavigationBar)
     @objc optional func mediaNavigationBarDidToggleQueueView(_ mediaNavigationBar: MediaNavigationBar)
     @objc optional func mediaNavigationBarDidToggleChromeCast(_ mediaNavigationBar: MediaNavigationBar)
     func mediaNavigationBarDidCloseLongPress(_ mediaNavigationBar: MediaNavigationBar)
@@ -26,7 +27,7 @@ private enum RendererActionSheetContent: Int, CaseIterable {
     case airplay, chromecast
 }
 
-@objc (VLCMediaNavigationBar)
+@objc(VLCMediaNavigationBar)
 @objcMembers class MediaNavigationBar: UIStackView {
     // MARK: Instance Variables
     weak var delegate: MediaNavigationBarDelegate?
@@ -66,6 +67,25 @@ private enum RendererActionSheetContent: Int, CaseIterable {
         return queueButton
     }()
 
+    lazy var rotateButton: UIButton = {
+        var rotateButton = UIButton(type: .system)
+        rotateButton.addTarget(self, action: #selector(toggleOrientation), for: .touchDown)
+        rotateButton.setImage(UIImage(named: "rectangle.landscape.rotate"), for: .normal)
+        rotateButton.tintColor = .white
+        rotateButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        rotateButton.accessibilityLabel = NSLocalizedString(
+            "ROTATE_BUTTON",
+            comment: "Accessibility label for rotate button on the player"
+        )
+        rotateButton.accessibilityHint = NSLocalizedString(
+            "ROTATE_BUTTON_HINT",
+            comment: "Accessibility hint for rotate button on the player"
+        )
+        rotateButton.isHidden = true
+        return rotateButton
+    }()
+
+#if os(iOS)
     lazy var chromeCastButton: UIButton = {
         var chromeButton = UIButton(type: .system)
         chromeButton.addTarget(self, action: #selector(toggleChromeCast), for: .touchDown)
@@ -86,6 +106,16 @@ private enum RendererActionSheetContent: Int, CaseIterable {
         return chromeButton
     }()
 
+    lazy var pictureInPictureButton: UIButton = {
+        var button = UIButton(type: .system)
+        button.addTarget(self, action: #selector(togglePictureInPicture),
+                               for: .touchDown)
+        button.setImage(UIImage(named: "pip.enter"), for: .normal)
+        button.tintColor = .white
+        button.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        return button
+    }()
+
     private var closureQueue: (() -> Void)? = nil
 
     private lazy var deviceActionSheet: ActionSheet = {
@@ -100,23 +130,21 @@ private enum RendererActionSheetContent: Int, CaseIterable {
         actionSheet.headerView.title.backgroundColor = PresentationTheme.currentExcludingWhite.colors.background
         return actionSheet
     }()
+#endif
 
     var presentingViewController: UIViewController?
 
+    #if os(iOS)
     private var rendererDiscovererService: VLCRendererDiscovererManager
 
     lazy var airplayRoutePickerView: UIView = {
-        if #available(iOS 11.0, *) {
-            var airPlayRoutePicker = AVRoutePickerView()
-            airPlayRoutePicker.activeTintColor = .orange
-            airPlayRoutePicker.tintColor = .white
-            return airPlayRoutePicker
-        } else {
-            assertionFailure("airplay route picker view is unavailable to iOS 10 and earlier")
-            return UIView()
-        }
+        var airPlayRoutePicker = AVRoutePickerView()
+        airPlayRoutePicker.activeTintColor = .orange
+        airPlayRoutePicker.tintColor = .white
+        return airPlayRoutePicker
     }()
-    
+    #endif
+
     lazy var airplayVolumeView: MPVolumeView = {
         var airplayVolumeView = MPVolumeView()
         airplayVolumeView.tintColor = .white
@@ -130,12 +158,20 @@ private enum RendererActionSheetContent: Int, CaseIterable {
         fatalError("init(coder: NSCoder) not implemented")
     }
 
+#if os(iOS)
     init(frame: CGRect, rendererDiscovererService: VLCRendererDiscovererManager) {
         self.rendererDiscovererService = rendererDiscovererService
         super.init(frame: frame)
         setupViews()
         setupContraints()
     }
+#else
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+        setupContraints()
+    }
+#endif
 
     // MARK: Instance Methods
     func setMediaTitleLabelText(_ titleText: String?) {
@@ -151,24 +187,29 @@ private enum RendererActionSheetContent: Int, CaseIterable {
     }
 
     func updateDeviceButton(with image: UIImage?, color: UIColor) {
+#if os(iOS)
         deviceButton.setImage(image, for: .normal)
         deviceButton.tintColor = color
+#endif
     }
 
     private func setupContraints() {
-        var constraints: [NSLayoutConstraint] = [
+#if os(iOS)
+        NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 44),
             closePlaybackButton.widthAnchor.constraint(equalTo: heightAnchor),
-            queueButton.widthAnchor.constraint(equalTo: heightAnchor)
-        ]
-
-        if #available(iOS 11.0, *) {
-            constraints.append(deviceButton.widthAnchor.constraint(equalTo: heightAnchor))
-        } else {
-            constraints.append(airplayVolumeView.widthAnchor.constraint(equalTo: heightAnchor))
-        }
-
-        NSLayoutConstraint.activate(constraints)
+            queueButton.widthAnchor.constraint(equalTo: heightAnchor),
+            rotateButton.widthAnchor.constraint(equalTo: heightAnchor),
+            deviceButton.widthAnchor.constraint(equalTo: heightAnchor)
+        ])
+#else
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 44),
+            closePlaybackButton.widthAnchor.constraint(equalTo: heightAnchor),
+            queueButton.widthAnchor.constraint(equalTo: heightAnchor),
+            rotateButton.widthAnchor.constraint(equalTo: heightAnchor),
+        ])
+#endif
     }
 
     private func setupViews() {
@@ -177,12 +218,14 @@ private enum RendererActionSheetContent: Int, CaseIterable {
         translatesAutoresizingMaskIntoConstraints = false
         addArrangedSubview(closePlaybackButton)
         addArrangedSubview(mediaTitleTextLabel)
+        addArrangedSubview(rotateButton)
         addArrangedSubview(queueButton)
-        if #available(iOS 11.0, *) {
-            addArrangedSubview(deviceButton)
-        } else {
-            addArrangedSubview(airplayVolumeView)
-        }
+#if os(iOS)
+        addArrangedSubview(deviceButton)
+        addArrangedSubview(pictureInPictureButton)
+#else
+        addArrangedSubview(airplayVolumeView)
+#endif
     }
 
     // MARK: Gesture recognizer
@@ -199,11 +242,17 @@ private enum RendererActionSheetContent: Int, CaseIterable {
 
     // MARK: Button Actions
 
+#if os(iOS)
     func toggleDeviceActionSheet() {
         deviceActionSheet.delegate = self
         deviceActionSheet.dataSource = self
         presentingViewController?.present(deviceActionSheet,
                                           animated: true)
+    }
+#endif
+
+    func togglePictureInPicture() {
+        delegate?.mediaNavigationBarDidTapPictureInPicture?(self)
     }
 
     func handleCloseTap() {
@@ -214,6 +263,10 @@ private enum RendererActionSheetContent: Int, CaseIterable {
     func toggleQueueView() {
         assert(delegate != nil, "Delegate not set for MediaNavigationBar")
         delegate?.mediaNavigationBarDidToggleQueueView?(self)
+    }
+
+    func toggleOrientation() {
+        vlc_toggleOrientation()
     }
 
     func toggleChromeCast() {
@@ -230,8 +283,16 @@ private enum RendererActionSheetContent: Int, CaseIterable {
         closePlaybackButton.accessibilityLabel = accessibility.0
         closePlaybackButton.accessibilityHint = accessibility.1
     }
+
+#if os(iOS)
+    func updatePictureInPictureButton(enabled: Bool) {
+        let image = UIImage(named: enabled ? "pip.exit" : "pip.enter")
+        pictureInPictureButton.setImage(image, for: .normal)
+    }
+#endif
 }
 
+#if os(iOS)
 extension MediaNavigationBar: ActionSheetDelegate, ActionSheetDataSource {
     func itemAtIndexPath(_ indexPath: IndexPath) -> Any? {
         if indexPath.row == 0 {
@@ -267,8 +328,8 @@ extension MediaNavigationBar: ActionSheetDelegate, ActionSheetDataSource {
     private func enableViews(_ enable: Bool, _ view: UIView) {
         view.subviews.forEach() {
             $0.alpha = enable ? 1 : 0.5
-            $0.isUserInteractionEnabled = enable
         }
+        view.isUserInteractionEnabled = enable
     }
 
     func actionSheet(collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -307,4 +368,4 @@ extension MediaNavigationBar: ActionSheetDelegate, ActionSheetDataSource {
         closureQueue = nil
     }
 }
-
+#endif
