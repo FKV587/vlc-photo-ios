@@ -978,6 +978,6 @@
 		</dict>
 	</array>
 	<key>com.apple.developer.networking.multicast</key>
-	<true/>
+	<false/>
 </dict>
 </plist>

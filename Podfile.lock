@@ -45,6 +45,9 @@ PODS:
   - GTMSessionFetcher/Full (1.7.2):
     - GTMSessionFetcher/Core (= 1.7.2)
   - InAppSettingsKit (2.14)
+  - LookinServer (1.2.2):
+    - LookinServer/Core (= 1.2.2)
+  - LookinServer/Core (1.2.2)
   - MarqueeLabel (4.0.2)
   - MetaDataFetcherKit (0.5.0):
     - AFNetworking (= 4.0.0)
@@ -90,6 +93,7 @@ DEPENDENCIES:
   - GRKArrayDiff (from `https://code.videolan.org/fkuehne/GRKArrayDiff.git`)
   - GTMAppAuth (~> 1.0)
   - InAppSettingsKit (from `https://github.com/Mikanbu/InAppSettingsKit.git`, commit `a429840`)
+  - LookinServer
   - MarqueeLabel (= 4.0.2)
   - MetaDataFetcherKit (~> 0.5.0)
   - MobileVLCKit (= 3.6.0b10)
@@ -112,6 +116,7 @@ SPEC REPOS:
     - GoogleSignIn
     - GTMAppAuth
     - GTMSessionFetcher
+    - LookinServer
     - MarqueeLabel
     - MetaDataFetcherKit
     - MobileVLCKit
@@ -181,6 +186,7 @@ SPEC CHECKSUMS:
   GTMAppAuth: 0ff230db599948a9ad7470ca667337803b3fc4dd
   GTMSessionFetcher: 5595ec75acf5be50814f81e9189490412bad82ba
   InAppSettingsKit: 3887d126d00a4ae468692deaaa7a8989e6b97fb7
+  LookinServer: 3204eefff2f18e19fa546931fb5f1b88bc709a0b
   MarqueeLabel: f762aa681ae201f66c1d511858b171f75d83013a
   MetaDataFetcherKit: c77fa3d0791d406a8cfab43464ed728437bd241b
   MobileVLCKit: 5600003cf2dc47acf7ad2fd87fe9f3739b2475ed
@@ -193,8 +199,8 @@ SPEC CHECKSUMS:
   TVVLCKit: a19f04eedfb342c24e968fa1bf0c09ff0cf9fcf6
   VLCMediaLibraryKit: d7a3f1bbcccabddfc5faa010058f92bc96c34ad3
   XKKeychain: 852ef663c56a7194c73d3c68e8d9d4f07b121d4f
-  xmlrpc: 2849d2a71cedfab68b1a8c82fb8373ce2ea0d0f3
+  xmlrpc: 1f2573295880d27b33ba2c07ed9e248fc9520828
 
-PODFILE CHECKSUM: faf948bab5058439ba70de164c3b51c1a4d0239c
+PODFILE CHECKSUM: 591a00a0c403c159b095d3c8ba721f8b2c44423b
 
-COCOAPODS: 1.12.0
+COCOAPODS: 1.13.0
