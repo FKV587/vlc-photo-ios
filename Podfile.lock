@@ -45,6 +45,9 @@ PODS:
   - GTMSessionFetcher/Full (1.7.2):
     - GTMSessionFetcher/Core (= 1.7.2)
   - InAppSettingsKit (2.14)
+  - LookinServer (1.2.8):
+    - LookinServer/Core (= 1.2.8)
+  - LookinServer/Core (1.2.8)
   - MarqueeLabel (4.5.0)
   - MetaDataFetcherKit (0.5.1):
     - AFNetworking
@@ -87,6 +90,7 @@ DEPENDENCIES:
   - GRKArrayDiff (from `https://code.videolan.org/fkuehne/GRKArrayDiff.git`)
   - GTMAppAuth (~> 1.0)
   - InAppSettingsKit (from `https://github.com/Mikanbu/InAppSettingsKit.git`, commit `a429840`)
+  - LookinServer
   - MarqueeLabel (from `https://code.videolan.org/fkuehne/MarqueeLabel.git`, commit `e289fa32`)
   - MetaDataFetcherKit (~> 0.5.0)
   - ObjectiveDropboxOfficial
@@ -107,6 +111,7 @@ SPEC REPOS:
     - GoogleSignIn
     - GTMAppAuth
     - GTMSessionFetcher
+    - LookinServer
     - MetaDataFetcherKit
     - ObjectiveDropboxOfficial
     - PCloudSDKSwift
@@ -191,6 +196,7 @@ SPEC CHECKSUMS:
   GTMAppAuth: 0ff230db599948a9ad7470ca667337803b3fc4dd
   GTMSessionFetcher: 5595ec75acf5be50814f81e9189490412bad82ba
   InAppSettingsKit: 3887d126d00a4ae468692deaaa7a8989e6b97fb7
+  LookinServer: 1b2b61c6402ae29fa22182d48f5cd067b4e99e80
   MarqueeLabel: 078f768fd80e373dbf99c2272ce4a7da3ce98a09
   MetaDataFetcherKit: bfe763f41e25eef64f40d205f9afdc1080d6df2e
   ObjectiveDropboxOfficial: 8699fa65969a94f8305d8dabf9c9a8dd856ac598
@@ -203,6 +209,6 @@ SPEC CHECKSUMS:
   VLCMediaLibraryKit: 5bbd1dd300e88b8df607077b2b01b6952c8d48fb
   XKKeychain: 160ce5bfeff49e9fef091f7fc2b2fe5a5aa08e08
 
-PODFILE CHECKSUM: 65a7fa9ee482022fade614219df0522c6399aafe
+PODFILE CHECKSUM: 7fbfdb3a64cec1bb559ab3161dff879bdf07b8c7
 
-COCOAPODS: 1.15.2
+COCOAPODS: 1.16.2

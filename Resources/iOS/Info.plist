@@ -360,9 +360,7 @@
 		</dict>
 	</dict>
 	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
+	<array/>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -518,9 +516,9 @@
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-				<string>aa3</string>
-				<string>oma</string>
-				<string>at3</string>
+					<string>aa3</string>
+					<string>oma</string>
+					<string>at3</string>
 				</array>
 				<key>public.mime-type</key>
 				<string>audio/atrac3</string>
